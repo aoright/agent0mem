@@ -48,6 +48,12 @@ def init_db():
                 created_at TEXT
             )
         """)
+        # Auto-migrate columns if table already existed
+        cursor = conn.execute("PRAGMA table_info(memories)")
+        cols = {row["name"] for row in cursor.fetchall()}
+        if "item_type" not in cols:
+            conn.execute("ALTER TABLE memories ADD COLUMN item_type TEXT DEFAULT 'raw'")
+
         conn.execute("""
             CREATE TABLE IF NOT EXISTS embeddings (
                 memory_id TEXT PRIMARY KEY,
