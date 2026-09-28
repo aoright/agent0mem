@@ -119,5 +119,7 @@ def extract_propositions(messages: List[Dict[str, Any]]) -> List[str]:
                 logger.warning(f"Qwen-turbo extraction attempt {attempt + 1} error: {str(e)}")
                 if attempt == 0:
                     time.sleep(0.5)
+    except Exception as e:
+        logger.warning(f"LLM proposition extraction outer fallback: {str(e)}")
 
     return dialogue_lines
