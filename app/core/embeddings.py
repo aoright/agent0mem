@@ -54,7 +54,7 @@ def get_embeddings(texts: List[str]) -> List[Optional[List[float]]]:
     if not missing_texts:
         return results
 
-    batch_size = 16
+    batch_size = 8  # DashScope text-embedding-v3 hard limit is 10
     for i in range(0, len(missing_texts), batch_size):
         chunk_texts = missing_texts[i:i + batch_size]
         chunk_indices = missing_indices[i:i + batch_size]
@@ -92,6 +92,9 @@ def get_embeddings(texts: List[str]) -> List[Optional[List[float]]]:
                         break
                     else:
                         logger.warning(f"DashScope embeddings attempt {attempt + 1} HTTP {resp.status}")
+            except urllib.error.HTTPError as e:
+                err_msg = e.read().decode("utf-8", errors="ignore")
+                logger.warning(f"DashScope embeddings attempt {attempt + 1} HTTP {e.code}: {err_msg}")
             except Exception as e:
                 logger.warning(f"DashScope embeddings attempt {attempt + 1} error: {str(e)}")
             time.sleep(0.5 * (attempt + 1))

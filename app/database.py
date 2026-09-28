@@ -25,9 +25,10 @@ PAST_QUERY_PATTERN = re.compile(
 
 
 def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, timeout=30.0)
+    conn = sqlite3.connect(DB_PATH, timeout=60.0)
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA synchronous = NORMAL")
+    conn.execute("PRAGMA busy_timeout = 60000")
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -177,6 +178,17 @@ def search_hybrid(
         """, (user_id,))
         rows = cursor.fetchall()
 
+        # Fallback to substring matching if exact match yields no records
+        if not rows:
+            cursor = conn.execute("""
+                SELECT m.memory_id, m.content, m.item_type, m.timestamp, m.created_at, e.vector
+                FROM memories m
+                LEFT JOIN embeddings e ON m.memory_id = e.memory_id
+                WHERE m.user_id LIKE '%' || ? || '%'
+                ORDER BY m.timestamp ASC
+            """, (user_id,))
+            rows = cursor.fetchall()
+
     if not rows:
         return []
 
@@ -187,7 +199,11 @@ def search_hybrid(
     clean_options = []
     if options:
         for opt in options:
-            cleaned = re.sub(r"^\s*(?:\([A-Za-z]\)|[A-Za-z][\.:])\s*", "", str(opt)).strip()
+            if isinstance(opt, dict):
+                opt_str = opt.get("text", "") or opt.get("content", "") or str(opt)
+            else:
+                opt_str = str(opt)
+            cleaned = re.sub(r"^\s*(?:\([A-Za-z]\)|[A-Za-z][\.:])\s*", "", opt_str).strip()
             if len(cleaned) > 1:
                 clean_options.append(cleaned.lower())
 

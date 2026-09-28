@@ -39,7 +39,7 @@ def health_check():
 
 
 @app.post("/add", response_model=AddResponse)
-async def add_memory(req: AddRequest):
+def add_memory(req: AddRequest):
     try:
         messages_dict = [msg.dict() for msg in req.messages]
         
@@ -70,7 +70,7 @@ async def add_memory(req: AddRequest):
 
 
 @app.post("/search", response_model=SearchResponse)
-async def search_memory(req: SearchRequest):
+def search_memory(req: SearchRequest):
     try:
         # Extract query text if list of parts or string
         if isinstance(req.query, list):
@@ -100,6 +100,7 @@ async def search_memory(req: SearchRequest):
             )
             for c in candidates
         ]
+        logger.info(f"Search for user {req.user_id}: returned {len(items)} items")
         return SearchResponse(data=items)
     except Exception as e:
         logger.error(f"Error processing Search request: {str(e)}", exc_info=True)

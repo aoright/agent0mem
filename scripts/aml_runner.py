@@ -82,7 +82,7 @@ def run_smoke_test(api_key: str, add_url: str, search_url: str, health_url: str)
             "add_endpoint": add_url,
             "search_endpoint": search_url,
             "health_endpoint": health_url,
-            "api_auth_scheme": "token",
+            "api_auth_scheme": "none",
             "memory_api_key": None
         }
     )
@@ -92,18 +92,18 @@ def run_smoke_test(api_key: str, add_url: str, search_url: str, health_url: str)
         return False
 
     test_id = res.get("test_id")
-    print(f"Smoke test initiated. Test ID: {test_id}")
+    test_token = res.get("test_token")
+    print(f"Smoke test initiated. Test ID: {test_id} (Token: {test_token})")
 
-    # Poll smoke test status
+    # Poll smoke test status using X-Integration-Test-Token
     poll_url = f"{AML_BASE_URL}/integration-tests/{test_id}"
-    for attempt in range(60):
+    for attempt in range(200):
         time.sleep(3)
         p_status, p_res = request_json(
             poll_url,
             method="GET",
             headers={
-                "X-Integration-Client-Id": client_id,
-                "X-Leaderboard-Api-Key": api_key,
+                "X-Integration-Test-Token": test_token,
             }
         )
         if p_status != 200:
@@ -121,7 +121,7 @@ def run_smoke_test(api_key: str, add_url: str, search_url: str, health_url: str)
             print(f"Smoke test FAILED: {p_res.get('error', p_res)}")
             return False
 
-    print("Smoke test timed out after 3 minutes.")
+    print("Smoke test timed out after 10 minutes.")
     return False
 
 
@@ -138,32 +138,38 @@ def get_active_versions(api_key: str):
 
 def run_full_evaluation(api_key: str, version_id: str, run_label: str = "agent0mem_v1_run1"):
     print(f"\nSubmitting Full Leaderboard Evaluation for version {version_id}...")
-    payload = {
+    v2_payload = {
         "version_id": version_id,
-        "mode": "full",
-        "max_add_concurrency": 16,
-        "top_k": 100,
+        "benchmark_type": "textual",
+        "phase": "full",
+        "options": {
+            "max_add_concurrency": 16,
+            "search_concurrency": 16,
+            "top_k": 100,
+        },
         "run_label": run_label
     }
 
+    # Primary: v2 track evaluations endpoint
     status, res = request_json(
-        f"{AML_BASE_URL}/eval-jobs",
+        f"{AML_BASE_URL}/api/v1/evaluations",
         method="POST",
         headers={"X-Leaderboard-Api-Key": api_key},
-        body=payload
+        body=v2_payload
     )
 
     if status not in (200, 201):
-        # Try v2 endpoint
+        print(f"v2 submission returned HTTP {status}: {res}, trying legacy endpoint...")
+        # Fallback to legacy eval-jobs
         status, res = request_json(
-            f"{AML_BASE_URL}/api/v1/evaluations",
+            f"{AML_BASE_URL}/eval-jobs",
             method="POST",
             headers={"X-Leaderboard-Api-Key": api_key},
             body={
                 "version_id": version_id,
-                "benchmark_type": "textual",
-                "phase": "full",
-                "options": {"top_k": 100, "max_add_concurrency": 16},
+                "mode": "full",
+                "max_add_concurrency": 16,
+                "top_k": 100,
                 "run_label": run_label
             }
         )
@@ -172,40 +178,52 @@ def run_full_evaluation(api_key: str, version_id: str, run_label: str = "agent0m
         print(f"Failed to submit evaluation job (HTTP {status}): {res}")
         return None
 
-    job_id = res.get("job_id") or res.get("evaluation_id")
+    job_id = res.get("evaluation_id") or res.get("job_id")
     print(f"Evaluation submitted successfully! Job ID: {job_id}")
     return job_id
 
 
 def monitor_job(api_key: str, job_id: str):
     print(f"\nMonitoring evaluation job: {job_id}")
-    poll_url = f"{AML_BASE_URL}/eval-jobs/{job_id}"
     v2_url = f"{AML_BASE_URL}/api/v1/evaluations/{job_id}"
+    poll_url = f"{AML_BASE_URL}/eval-jobs/{job_id}"
 
     last_status = None
+    poll_count = 0
     while True:
-        status, res = request_json(poll_url, headers={"X-Leaderboard-Api-Key": api_key})
+        poll_count += 1
+        status, res = request_json(v2_url, headers={"X-Leaderboard-Api-Key": api_key})
         if status != 200:
-            status, res = request_json(v2_url, headers={"X-Leaderboard-Api-Key": api_key})
+            status, res = request_json(poll_url, headers={"X-Leaderboard-Api-Key": api_key})
 
         if status == 200:
             current_status = res.get("status")
             progress = res.get("progress", {})
-            if current_status != last_status:
-                print(f"Job Status: {current_status} | Progress: {progress}")
-                last_status = current_status
+            current_item = res.get("current", "")
+            stage = res.get("stage", "")
+            done = res.get("done") or (progress.get("done") if isinstance(progress, dict) else None)
+            total = res.get("total") or (progress.get("total") if isinstance(progress, dict) else None)
+
+            progress_str = f"[{current_status}] stage: {stage} | progress: {done}/{total} | {current_item}"
+            print(f"[Poll {poll_count}] {progress_str}")
 
             if current_status in ("completed", "finished", "success"):
-                print("Evaluation completed!")
-                scores = res.get("scores", res.get("summary", {}))
-                print("Final Scores:")
+                print("\n==========================================")
+                print("EVALUATION COMPLETED SUCCESSFULLY!")
+                print("==========================================")
+                scores = res.get("scores", res.get("summary", res.get("result", {})))
+                print("Results:")
                 print(json.dumps(scores, indent=2, ensure_ascii=False))
-                break
-            elif current_status in ("failed", "error", "canceled"):
-                print(f"Evaluation finished with status: {current_status}")
                 print(json.dumps(res, indent=2, ensure_ascii=False))
                 break
-        time.sleep(15)
+            elif current_status in ("failed", "error", "canceled"):
+                print(f"\nEvaluation finished with status: {current_status}")
+                print(json.dumps(res, indent=2, ensure_ascii=False))
+                break
+        else:
+            print(f"[Poll {poll_count}] Polling HTTP {status}: {res}")
+
+        time.sleep(10)
 
 
 def main():

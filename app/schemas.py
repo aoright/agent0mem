@@ -30,8 +30,9 @@ class AddResponse(BaseModel):
 
 class SearchRequest(BaseModel):
     query: Union[str, List[Union[dict, MessagePart]]]
-    options: Optional[List[str]] = None
+    options: Optional[List[Any]] = None
     user_id: str
+    session_id: Optional[str] = None
     top_k: int = 100
 
 

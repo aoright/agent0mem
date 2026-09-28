@@ -87,26 +87,37 @@ def extract_propositions(messages: List[Dict[str, Any]]) -> List[str]:
                 {"role": "user", "content": f"Conversation:\n{full_dialogue}\n\nAtomic Propositions (JSON array):"}
             ],
             "temperature": 0.1,
-            "max_tokens": 1024
+            "max_tokens": 4096
         }).encode("utf-8")
 
-        req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=15.0) as resp:
-            if resp.status == 200:
-                result = json.loads(resp.read().decode("utf-8"))
-                raw_text = result.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-                if raw_text.startswith("```"):
-                    parts = raw_text.split("```")
-                    if len(parts) >= 2:
-                        raw_text = parts[1]
-                        if raw_text.startswith("json"):
-                            raw_text = raw_text[4:].strip()
-                propositions = json.loads(raw_text)
-                if isinstance(propositions, list) and propositions:
-                    return [str(p).strip() for p in propositions if str(p).strip()]
-            else:
-                logger.warning(f"Qwen-turbo extraction HTTP {resp.status}")
-    except Exception as e:
-        logger.warning(f"LLM proposition extraction fallback: {str(e)}")
+        for attempt in range(2):
+            try:
+                req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+                with urllib.request.urlopen(req, timeout=20.0) as resp:
+                    if resp.status == 200:
+                        result = json.loads(resp.read().decode("utf-8"))
+                        raw_text = result.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                        if raw_text.startswith("```"):
+                            parts = raw_text.split("```")
+                            if len(parts) >= 2:
+                                raw_text = parts[1]
+                                if raw_text.startswith("json"):
+                                    raw_text = raw_text[4:].strip()
+                        propositions = []
+                        try:
+                            propositions = json.loads(raw_text)
+                        except Exception:
+                            import re
+                            # Fallback to regex extraction of complete JSON string literals
+                            matches = re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', raw_text)
+                            propositions = [m.replace('\\"', '"').replace('\\n', ' ') for m in matches if len(m) > 10]
+                        if isinstance(propositions, list) and propositions:
+                            return [str(p).strip() for p in propositions if str(p).strip()]
+                    else:
+                        logger.warning(f"Qwen-turbo extraction HTTP {resp.status}")
+            except Exception as e:
+                logger.warning(f"Qwen-turbo extraction attempt {attempt + 1} error: {str(e)}")
+                if attempt == 0:
+                    time.sleep(0.5)
 
     return dialogue_lines
