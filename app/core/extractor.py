@@ -27,8 +27,8 @@ Rules:
        "[Prior State / Superseded] Entity previously ... (e.g., [Prior State / Superseded] Jordan previously drank black coffee every morning, before switching to matcha latte)"
 5. Exact Lists:
    - For lists of items (e.g., hobbies, visited countries, ingredients, recommendations), include all mentioned items and do not hallucinate extras.
-6. Constraints and Negative Preferences:
-   - Explicitly record any negative preferences or constraints (e.g., "User avoids seafood", "User dislikes bullet points").
+6. Constraints, Allergies, and Negative Preferences:
+   - Explicitly record all mentioned constraints, allergies, and negative preferences completely. Do not omit any items or allergens (e.g., if the user avoids peanuts and shellfish, include BOTH: "User strictly avoids peanuts and shellfish due to severe allergies").
 7. Ignore meaningless pleasantries, greetings, and filler (e.g., "hi", "ok", "sounds good", "thanks").
 8. Return only a valid JSON array of strings. Do not wrap in markdown or commentary.
 """
