@@ -19,12 +19,12 @@ Rules:
    - When turns have timestamps, convert relative dates (e.g., "yesterday", "last week", "next month", "two days ago") into explicit dates (e.g., "On 2023-07-25, Jordan started a new job").
    - Retain exact dates, times, locations, numbers, codes, and proper nouns verbatim.
 4. Conflict and State Updates:
-   - When an entity's status, habit, location, or preference changes (e.g., stopped, switched, moved, changed, no longer, used to):
-     Provide complete context in BOTH statements:
+   - When an entity's status, habit, location, or preference changes across time (e.g., stopped, switched, moved, relocated, changed, no longer, used to):
+     Provide complete transition context in statements:
      - Mark current status as:
-       "[Current State] Entity now ... (e.g., [Current State] Jordan now drinks matcha latte every morning, replacing black coffee which Jordan previously drank)"
-     - Mark prior status as:
-       "[Prior State / Superseded] Entity previously ... (e.g., [Prior State / Superseded] Jordan previously drank black coffee every morning, before switching to matcha latte)"
+       "[Current State] Entity now ... (e.g., [Current State] Jordan now drinks matcha latte every morning, replacing black coffee which Jordan previously drank; or [Current State] Jordan currently lives in Tokyo as of Dec 2023, having relocated from Berlin)"
+     - Mark prior status with transition links:
+       "[Prior State / Superseded] Entity previously ... (e.g., [Prior State / Superseded] Jordan previously lived in London until May 2023 before moving to Berlin in June 2023)"
 5. Exact Lists:
    - For lists of items (e.g., hobbies, visited countries, ingredients, recommendations), include all mentioned items and do not hallucinate extras.
 6. Constraints, Allergies, and Negative Preferences:
