@@ -1,82 +1,115 @@
 import math
 import re
-from typing import List, Dict, Any, Tuple
+from collections import Counter
+from typing import List, Dict, Tuple, Optional
 
 
 def tokenize(text: str) -> List[str]:
-    """Tokenize English words, numbers, and CJK characters."""
+    """Code-aware and multi-lingual tokenizer for English, CJK, code identifiers, and symbols."""
     if not text:
         return []
-    text = text.lower()
-    # Match words (including numbers and underscores) or individual CJK characters
-    tokens = re.findall(r"[\w]+|[\u4e00-\u9fff]", text)
+    tokens = []
+    # 1. Base English / ASCII alphanumeric words and identifiers
+    en_words = re.findall(r"[a-zA-Z0-9]+(?:[._-][a-zA-Z0-9]+)*", text.lower())
+    for w in en_words:
+        tokens.append(w)
+        if "_" in w or "." in w or "-" in w:
+            for part in re.split(r"[_.-]+", w):
+                if len(part) > 1 and part != w:
+                    tokens.append(part)
+
+    # 2. Extract camelCase sub-identifiers from original case
+    camel_words = re.findall(r"[a-zA-Z0-9]+", text)
+    for cw in camel_words:
+        splits = re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z][a-z]|\d|\W|$)|[0-9]+", cw)
+        if len(splits) > 1:
+            for s in splits:
+                s_lower = s.lower()
+                if len(s_lower) > 1 and s_lower not in tokens:
+                    tokens.append(s_lower)
+
+    # 3. Chinese / CJK unigrams and bigrams
+    zh_chars = re.findall(r"[\u4e00-\u9fff]", text)
+    for c in zh_chars:
+        tokens.append(c)
+    for i in range(len(zh_chars) - 1):
+        tokens.append(zh_chars[i] + zh_chars[i + 1])
+
     return tokens
 
 
 class BM25Index:
+    """High-performance BM25 Index with inverted index postings."""
     def __init__(self, k1: float = 1.5, b: float = 0.75):
         self.k1 = k1
         self.b = b
         self.corpus_size = 0
         self.avgdl = 0.0
-        self.doc_freqs: Dict[str, int] = {}
-        self.idf: Dict[str, float] = {}
-        self.doc_lens: List[int] = []
-        self.doc_tokens: List[List[str]] = []
         self.doc_ids: List[str] = []
+        self.doc_lens: List[int] = []
+        # Inverted index: token -> list of (doc_index, term_frequency)
+        self.inverted_index: Dict[str, List[Tuple[int, int]]] = {}
+        self.idf: Dict[str, float] = {}
 
     def fit(self, documents: List[Tuple[str, str]]):
-        """Fit index with a list of (doc_id, text) tuples."""
+        """Fit index with a list of (doc_id, text) tuples in O(N_tokens)."""
+        self.corpus_size = len(documents)
         self.doc_ids = []
-        self.doc_tokens = []
         self.doc_lens = []
-        self.doc_freqs = {}
-
+        self.inverted_index = {}
         total_length = 0
-        for doc_id, text in documents:
-            tokens = tokenize(text)
+
+        for idx, (doc_id, text) in enumerate(documents):
             self.doc_ids.append(doc_id)
-            self.doc_tokens.append(tokens)
+            tokens = tokenize(text)
             l = len(tokens)
             self.doc_lens.append(l)
             total_length += l
 
-            # Track doc frequencies
-            seen_tokens = set(tokens)
-            for t in seen_tokens:
-                self.doc_freqs[t] = self.doc_freqs.get(t, 0) + 1
+            counts = Counter(tokens)
+            for token, freq in counts.items():
+                if token not in self.inverted_index:
+                    self.inverted_index[token] = []
+                self.inverted_index[token].append((idx, freq))
 
-        self.corpus_size = len(documents)
-        self.avgdl = (total_length / self.corpus_size) if self.corpus_size > 0 else 0.0
+        self.avgdl = (total_length / self.corpus_size) if self.corpus_size > 0 else 1.0
 
-        # Calculate IDF
+        # Calculate BM25 Robertson-Sparck Jones IDF
         self.idf = {}
-        for token, freq in self.doc_freqs.items():
-            # BM25 IDF formula with smoothing
-            self.idf[token] = math.log(1.0 + (self.corpus_size - freq + 0.5) / (freq + 0.5))
+        for token, postings in self.inverted_index.items():
+            df = len(postings)
+            self.idf[token] = math.log(1.0 + (self.corpus_size - df + 0.5) / (df + 0.5))
 
     def score(self, query: str) -> List[Tuple[str, float]]:
-        """Score all documents against query and return list of (doc_id, score) sorted desc."""
+        """Score documents against query using inverted index lookup with query-calibrated normalization."""
         if not self.corpus_size:
             return []
 
         query_tokens = tokenize(query)
+        if not query_tokens:
+            return [(doc_id, 0.0) for doc_id in self.doc_ids]
+
         scores = [0.0] * self.corpus_size
+        max_possible = 0.0
+        seen_q = set()
+        default_idf = math.log(1.0 + (self.corpus_size + 0.5) / 0.5)
 
         for q in query_tokens:
-            if q not in self.idf:
+            if q in seen_q:
                 continue
-            q_idf = self.idf[q]
+            seen_q.add(q)
+            q_idf = self.idf.get(q, default_idf)
+            max_possible += q_idf * (self.k1 + 1.0)
 
-            for idx, doc in enumerate(self.doc_tokens):
-                # Count frequency of q in doc
-                tf = doc.count(q)
-                if tf == 0:
-                    continue
-                doc_len = self.doc_lens[idx]
-                numerator = tf * (self.k1 + 1.0)
-                denominator = tf + self.k1 * (1.0 - self.b + self.b * (doc_len / (self.avgdl or 1.0)))
-                scores[idx] += q_idf * (numerator / denominator)
+            if q in self.inverted_index:
+                for doc_idx, tf in self.inverted_index[q]:
+                    doc_len = self.doc_lens[doc_idx]
+                    numerator = tf * (self.k1 + 1.0)
+                    denominator = tf + self.k1 * (1.0 - self.b + self.b * (doc_len / self.avgdl))
+                    scores[doc_idx] += q_idf * (numerator / denominator)
+
+        if max_possible > 0:
+            scores = [round(s / max_possible, 4) for s in scores]
 
         ranked = [(self.doc_ids[i], scores[i]) for i in range(self.corpus_size)]
         ranked.sort(key=lambda x: x[1], reverse=True)

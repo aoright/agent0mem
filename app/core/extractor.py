@@ -1,4 +1,5 @@
 import json
+import time
 import logging
 import urllib.request
 import urllib.error
@@ -60,7 +61,22 @@ def extract_propositions(messages: List[Dict[str, Any]]) -> List[str]:
         time_prefix = f"[{format_timestamp(ts)}] " if ts else ""
 
         if isinstance(content, list):
-            parts = [p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"]
+            parts = []
+            for p in content:
+                if isinstance(p, dict):
+                    if p.get("type") == "text" and p.get("text"):
+                        parts.append(p.get("text"))
+                    elif p.get("type") in ("image_url", "image") or "image_url" in p or "image" in p:
+                        img_data = p.get("image_url", p.get("image", {}))
+                        img_url = img_data.get("url") if isinstance(img_data, dict) else (p.get("url") or str(img_data))
+                        if img_url and isinstance(img_url, str) and (img_url.startswith("http") or img_url.startswith("data:")):
+                            try:
+                                from app.core.vision import describe_image
+                                v_desc = describe_image(img_url)
+                                if v_desc:
+                                    parts.append(f"[Visual Content] {v_desc}")
+                            except Exception:
+                                pass
             content = " ".join(parts)
         content_str = str(content).strip()
         if content_str and len(content_str) > 1:
@@ -71,8 +87,20 @@ def extract_propositions(messages: List[Dict[str, Any]]) -> List[str]:
 
     full_dialogue = "\n".join(dialogue_lines)
 
+    # Directly preserve code diffs and patches as high-priority propositions
+    patch_propositions = []
+    for line in dialogue_lines:
+        if any(marker in line for marker in ["diff --git", "--- a/", "+++ b/", "@@ -"]):
+            patch_propositions.append(f"[Code Patch / Solution] {line[:3000]}")
+
     if not ENABLE_LLM_EXTRACTION or not DASHSCOPE_API_KEY:
-        return dialogue_lines
+        return patch_propositions + dialogue_lines
+
+    # Guard against massive token overflow in coding trajectories
+    if len(full_dialogue) > 12000:
+        dialogue_for_llm = full_dialogue[:6000] + "\n...[truncated long middle section]...\n" + full_dialogue[-6000:]
+    else:
+        dialogue_for_llm = full_dialogue
 
     try:
         url = f"{DASHSCOPE_BASE_URL}/chat/completions"
@@ -84,16 +112,16 @@ def extract_propositions(messages: List[Dict[str, Any]]) -> List[str]:
             "model": "qwen-turbo",
             "messages": [
                 {"role": "system", "content": EXTRACTION_PROMPT},
-                {"role": "user", "content": f"Conversation:\n{full_dialogue}\n\nAtomic Propositions (JSON array):"}
+                {"role": "user", "content": f"Conversation:\n{dialogue_for_llm}\n\nAtomic Propositions (JSON array):"}
             ],
             "temperature": 0.1,
             "max_tokens": 4096
         }).encode("utf-8")
 
-        for attempt in range(2):
+        for attempt in range(1):
             try:
                 req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-                with urllib.request.urlopen(req, timeout=20.0) as resp:
+                with urllib.request.urlopen(req, timeout=6.0) as resp:
                     if resp.status == 200:
                         result = json.loads(resp.read().decode("utf-8"))
                         raw_text = result.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
@@ -112,7 +140,8 @@ def extract_propositions(messages: List[Dict[str, Any]]) -> List[str]:
                             matches = re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', raw_text)
                             propositions = [m.replace('\\"', '"').replace('\\n', ' ') for m in matches if len(m) > 10]
                         if isinstance(propositions, list) and propositions:
-                            return [str(p).strip() for p in propositions if str(p).strip()]
+                            clean_props = [str(p).strip() for p in propositions if str(p).strip()]
+                            return patch_propositions + clean_props
                     else:
                         logger.warning(f"Qwen-turbo extraction HTTP {resp.status}")
             except Exception as e:
@@ -122,4 +151,4 @@ def extract_propositions(messages: List[Dict[str, Any]]) -> List[str]:
     except Exception as e:
         logger.warning(f"LLM proposition extraction outer fallback: {str(e)}")
 
-    return dialogue_lines
+    return patch_propositions + dialogue_lines

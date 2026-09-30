@@ -72,13 +72,65 @@ def add_memory(req: AddRequest):
 @app.post("/search", response_model=SearchResponse)
 def search_memory(req: SearchRequest):
     try:
-        # Extract query text if list of parts or string
+        # Extract query text if list of parts, dict, or string (with query-side visual description support)
         if isinstance(req.query, list):
-            text_parts = [
-                p.get("text", "") for p in req.query
-                if isinstance(p, dict) and p.get("type") == "text"
-            ]
-            query_str = " ".join(text_parts) if text_parts else str(req.query)
+            text_parts = []
+            for p in req.query:
+                if isinstance(p, dict):
+                    t = p.get("text", "")
+                    if t:
+                        text_parts.append(t)
+                    img_url = None
+                    if "image_url" in p:
+                        img_data = p.get("image_url", {})
+                        img_url = img_data.get("url") if isinstance(img_data, dict) else str(img_data)
+                    elif "url" in p and p.get("type") in ("image_url", "image"):
+                        img_url = p.get("url")
+                    if img_url:
+                        try:
+                            from app.core.vision import describe_image
+                            v_desc = describe_image(img_url)
+                            if v_desc:
+                                text_parts.append(f"[Visual Context: {v_desc}]")
+                        except Exception:
+                            pass
+                elif hasattr(p, "text"):
+                    t = p.text or ""
+                    if t:
+                        text_parts.append(t)
+                    if hasattr(p, "image_url") and p.image_url:
+                        img_data = p.image_url
+                        img_url = img_data.get("url") if isinstance(img_data, dict) else str(img_data)
+                        if img_url:
+                            try:
+                                from app.core.vision import describe_image
+                                v_desc = describe_image(img_url)
+                                if v_desc:
+                                    text_parts.append(f"[Visual Context: {v_desc}]")
+                            except Exception:
+                                pass
+                else:
+                    t = str(p)
+                    if t:
+                        text_parts.append(t)
+            query_str = " ".join(text_parts).strip() or str(req.query)
+        elif isinstance(req.query, dict):
+            query_str = req.query.get("text", "")
+            img_url = None
+            if "image_url" in req.query:
+                img_data = req.query.get("image_url", {})
+                img_url = img_data.get("url") if isinstance(img_data, dict) else str(img_data)
+            elif "url" in req.query:
+                img_url = req.query.get("url")
+            if img_url:
+                try:
+                    from app.core.vision import describe_image
+                    v_desc = describe_image(img_url)
+                    if v_desc:
+                        query_str = f"{query_str} [Visual Context: {v_desc}]".strip()
+                except Exception:
+                    pass
+            query_str = query_str or str(req.query)
         else:
             query_str = str(req.query)
 
@@ -87,8 +139,12 @@ def search_memory(req: SearchRequest):
             user_id=req.user_id,
             query_text=query_str,
             options=req.options,
-            top_k=req.top_k
+            top_k=min(req.top_k, 25)
         )
+
+        # Cap candidates to top 15 most relevant items to eliminate noisy distractors and reduce return size
+        if len(candidates) > 15:
+            candidates = candidates[:15]
 
         items = [
             SearchMemoryItem(
@@ -100,7 +156,7 @@ def search_memory(req: SearchRequest):
             )
             for c in candidates
         ]
-        logger.info(f"Search for user {req.user_id}: returned {len(items)} items")
+        logger.info(f"Search for user {req.user_id}: query={query_str[:120]!r}, returned {len(items)} items")
         return SearchResponse(data=items)
     except Exception as e:
         logger.error(f"Error processing Search request: {str(e)}", exc_info=True)

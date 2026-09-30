@@ -54,11 +54,16 @@ def get_embeddings(texts: List[str]) -> List[Optional[List[float]]]:
     if not missing_texts:
         return results
 
+    from concurrent.futures import ThreadPoolExecutor
+
+    chunks = []
     batch_size = 8  # DashScope text-embedding-v3 hard limit is 10
     for i in range(0, len(missing_texts), batch_size):
         chunk_texts = missing_texts[i:i + batch_size]
         chunk_indices = missing_indices[i:i + batch_size]
+        chunks.append((chunk_texts, chunk_indices, i // batch_size))
 
+    def fetch_chunk(chunk_texts, chunk_indices, batch_num):
         payload = json.dumps({
             "model": "text-embedding-v3",
             "input": {
@@ -72,7 +77,6 @@ def get_embeddings(texts: List[str]) -> List[Optional[List[float]]]:
         }
 
         # Retry with exponential backoff up to 3 times
-        success = False
         for attempt in range(3):
             req = urllib.request.Request(DASHSCOPE_EMBED_URL, data=payload, headers=headers, method="POST")
             try:
@@ -85,11 +89,9 @@ def get_embeddings(texts: List[str]) -> List[Optional[List[float]]]:
                             orig_idx = chunk_indices[sub_idx]
                             emb_vec = item.get("embedding")
                             results[orig_idx] = emb_vec
-                            # Cache vector
                             if emb_vec and len(_CACHE) < _MAX_CACHE_SIZE:
                                 _CACHE[chunk_texts[sub_idx]] = emb_vec
-                        success = True
-                        break
+                        return True
                     else:
                         logger.warning(f"DashScope embeddings attempt {attempt + 1} HTTP {resp.status}")
             except urllib.error.HTTPError as e:
@@ -97,9 +99,14 @@ def get_embeddings(texts: List[str]) -> List[Optional[List[float]]]:
                 logger.warning(f"DashScope embeddings attempt {attempt + 1} HTTP {e.code}: {err_msg}")
             except Exception as e:
                 logger.warning(f"DashScope embeddings attempt {attempt + 1} error: {str(e)}")
-            time.sleep(0.5 * (attempt + 1))
+            time.sleep(0.3 * (attempt + 1))
 
-        if not success:
-            logger.error(f"Failed to generate embeddings after retries for batch {i // batch_size}")
+        logger.error(f"Failed to generate embeddings after retries for batch {batch_num}")
+        return False
+
+    with ThreadPoolExecutor(max_workers=min(6, len(chunks))) as executor:
+        futures = [executor.submit(fetch_chunk, ct, ci, bn) for ct, ci, bn in chunks]
+        for f in futures:
+            f.result()
 
     return results
