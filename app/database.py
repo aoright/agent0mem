@@ -485,9 +485,9 @@ def search_hybrid(
 
             # Proposition and rich visual memory preference boost (scaled by relevance)
             if item_type == "proposition":
-                base_score += (0.15 * rel_factor)
+                base_score += (0.28 * rel_factor)
             elif "[Visual Content]" in content or "[Visual Context" in content or "Image Caption:" in content:
-                base_score += (0.20 * rel_factor)
+                base_score += (0.22 * rel_factor)
 
             # Sequential connector bonus for multi-step questions
             if any(k in query_text for k in ["先后", "哪两步", "两步", "顺序", "两件事", "哪两"]):
