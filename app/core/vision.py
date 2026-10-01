@@ -15,8 +15,9 @@ _MAX_CACHE_SIZE = 256
 
 VISION_PROMPT = (
     "Analyze this image comprehensively. Describe all visible objects, "
-    "text/numbers/labels (verbatim OCR), dominant and background colors, "
-    "people/animals, prices/costs, timestamps, and key visual details in 2-3 concise sentences."
+    "text/numbers/labels (verbatim OCR), background color and dominant colors, "
+    "people/animals, prices/costs, timestamps, and key visual details in 2-3 concise sentences. "
+    "Explicitly state the background color (e.g., 'Background color: white') and dominant colors."
 )
 
 

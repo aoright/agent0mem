@@ -36,12 +36,19 @@ def compute_negative_penalty(content_lower: str, negative_terms: List[str]) -> f
         return 0.0
 
     penalty = 0.0
+    # If the memory explicitly represents a user constraint, allergy, or dietary restriction,
+    # do not penalize it for mentioning the restricted item!
+    is_constraint_doc = bool(re.search(r"\b(?:constraint|restriction|allergy|allergic|vegan|vegetarian|diet|kosher|halal)\b|\[strict constraint\]", content_lower))
+
     for term in negative_terms:
         if term in content_lower:
+            if is_constraint_doc:
+                continue
+
             # Check if the memory itself negates or records avoidance of this term
             # (e.g. 'not seafood', 'avoids dairy and seafood', 'never eats meat')
             neg_in_doc = bool(re.search(
-                rf"\b(?:not|no|non|free from|without|avoid|avoids|avoiding|never|don't|dislike|dislikes|不吃|避免|不含)\s*(?:[A-Za-z0-9_\u4e00-\u9fff\s]{0,15}\s*)?{re.escape(term)}\b",
+                rf"\b(?:not|no|non|free from|without|avoid|avoids|avoiding|never|don't|dislike|dislikes|allergy|allergic|不吃|避免|不含)\s*(?:[A-Za-z0-9_\u4e00-\u9fff\s]{{0,25}}\s*)?{re.escape(term)}\b",
                 content_lower
             ))
             if not neg_in_doc:

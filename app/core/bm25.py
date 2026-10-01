@@ -4,6 +4,23 @@ from collections import Counter
 from typing import List, Dict, Tuple, Optional
 
 
+def get_word_stem(w: str) -> str:
+    """Lightweight rule-based morphological stemmer for English words."""
+    if len(w) <= 3:
+        return w
+    for suffix in ["ing", "ed", "ly", "tion", "able", "ment"]:
+        if w.endswith(suffix) and len(w) - len(suffix) >= 3:
+            stem = w[:-len(suffix)]
+            if len(stem) >= 4 and stem[-1] == stem[-2] and stem[-1] in "bdfgmnprt":
+                stem = stem[:-1]
+            return stem
+    if w.endswith("ies") and len(w) >= 5:
+        return w[:-3] + "y"
+    if w.endswith("s") and not w.endswith("ss") and len(w) >= 4:
+        return w[:-1]
+    return w
+
+
 def tokenize(text: str) -> List[str]:
     """Code-aware and multi-lingual tokenizer for English, CJK, code identifiers, and symbols."""
     if not text:
@@ -13,6 +30,9 @@ def tokenize(text: str) -> List[str]:
     en_words = re.findall(r"[a-zA-Z0-9]+(?:[._-][a-zA-Z0-9]+)*", text.lower())
     for w in en_words:
         tokens.append(w)
+        stem = get_word_stem(w)
+        if stem != w and stem not in tokens:
+            tokens.append(stem)
         if "_" in w or "." in w or "-" in w:
             for part in re.split(r"[_.-]+", w):
                 if len(part) > 1 and part != w:
