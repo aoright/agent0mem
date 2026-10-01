@@ -881,7 +881,8 @@ def search_hybrid(
                 base_score *= 0.40
 
             if any(ext in content_lower for ext in [".py", ".pyx", ".c", ".h", ".cpp"]):
-                base_score += 0.35
+                if not (q_file_mentions or q_modules) or any(fm in content_lower for fm in q_file_mentions) or any(m in content_lower for m in q_modules):
+                    base_score += 0.35
 
             has_diff = any(k in content for k in ["diff --git", "--- a/", "+++ b/", "@@ -", "```diff", "[Code Patch / Solution]"])
 
@@ -906,12 +907,12 @@ def search_hybrid(
                     base_score *= 0.35
 
                 # Cross-module isolation: if query targets module A and not module B, demote files modifying module B
-                ASTROPY_SUBMODULES = ["timeseries", "table", "ascii", "console", "utils"]
+                ASTROPY_SUBMODULES = ["timeseries", "table", "ascii", "console", "utils", "units", "io", "coordinates", "modeling", "wcs", "visualization"]
                 for target_mod in ASTROPY_SUBMODULES:
                     if target_mod in q_modules or (target_mod == "timeseries" and "timeseries" in query_lower):
                         for other_mod in ASTROPY_SUBMODULES:
                             if other_mod != target_mod and other_mod not in q_modules and other_mod not in query_lower:
-                                if f"astropy/{other_mod}/" in content_lower or f"astropy.{other_mod}" in content_lower or f"astropy/utils/{other_mod}.py" in content_lower or f"{other_mod}.py" in content_lower:
+                                if f"astropy/{other_mod}/" in content_lower or f"astropy.{other_mod}" in content_lower or f"/{other_mod}/" in content_lower or f"astropy/utils/{other_mod}.py" in content_lower or f"{other_mod}.py" in content_lower:
                                     mismatched_module = True
                                     base_score *= 0.15
 
