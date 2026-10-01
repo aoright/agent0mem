@@ -519,7 +519,7 @@ def search_hybrid(
 
         if query_is_zh or not can_use_dense:
             if matched_q == 0 and not has_spend_match and not has_opt_match:
-                return make_unmentioned_notice(query_text) if has_abstain_choice else []
+                return make_unmentioned_notice(query_text)
 
         if (query_is_zh or not can_use_dense) and shares_script and not has_spend_match and not has_opt_match and len(q_substantive) >= 4 and (matched_q / float(len(q_substantive))) < 0.28:
             if is_spend_query:
@@ -533,13 +533,13 @@ def search_hybrid(
                     "timestamp": 0,
                     "item_type": "proposition"
                 }]
-            return make_unmentioned_notice(query_text) if has_abstain_choice else []
+            return make_unmentioned_notice(query_text)
 
         # Absent Temporal Anchor Guard:
         # If query specifies a prominent temporal milestone (e.g., "春节", "大年初一", "除夕", "节后")
         # but that temporal milestone is completely absent from all user memories, abstain immediately.
         if any(k in query_text for k in ["春节", "大年初一", "除夕", "节后"]) and not any(k in all_user_zh_bi for k in ["春节", "节后", "初一", "除夕"]):
-            return make_unmentioned_notice(query_text) if has_abstain_choice else []
+            return make_unmentioned_notice(query_text)
 
         # Option-based Deterministic Abstention Guard:
         # If downstream MCQ provides an abstention option (e.g. "Cannot infer", "无法推断"),
@@ -569,7 +569,7 @@ def search_hybrid(
             matched_pred = sum(1 for t in en_predicates if t in all_user_en or get_stem(t) in all_user_stems) + \
                            sum(1 for t in zh_predicates if t in all_user_zh_bi)
             if matched_pred == 0:
-                return make_unmentioned_notice(query_text) if has_abstain_choice else []
+                return make_unmentioned_notice(query_text)
 
     # 1. BM25 scoring on question query using inverted index (query-calibrated against missing terms)
     bm25 = get_or_build_bm25_index(user_id, rows)
@@ -1170,7 +1170,7 @@ def search_hybrid(
                 "item_type": "proposition"
             }]
         elif not is_spend_query:
-            return make_unmentioned_notice(query_text) if has_abstain_choice else []
+            return make_unmentioned_notice(query_text)
 
     # Spend / Numeric Question Guard:
     # If the user asks how much they spent on an item, verify if any actual purchase exists.
@@ -1328,7 +1328,7 @@ def search_hybrid(
     if expanded_items and should_verify and DASHSCOPE_API_KEY:
         cand_sample = "\n".join(f"- {item['content'][:450]}" for item in expanded_items[:6])
         if not verify_answerability_with_llm(query_text, cand_sample, clean_options):
-            return make_unmentioned_notice(query_text) if has_abstain_choice else []
+            return make_unmentioned_notice(query_text)
 
 
     # 7. Hard Bounded Payload:

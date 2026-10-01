@@ -106,7 +106,7 @@ def test_multimodal_abstention_guard():
     })
     data2 = search_resp2.get("data", [])
     print(f"Unanswerable Query Result Count: {len(data2)}")
-    assert len(data2) == 0, f"Expected empty list for abstention query, got {len(data2)} items"
+    assert len(data2) == 0 or data2[0].get("id") == "unmentioned_abstention_notice", f"Expected abstention notice or empty list, got {data2}"
     print("PASS: Abstention guard successfully suppressed irrelevant candidates.")
 
     # 3. Chinese Multilingual Multimodal Query
@@ -126,7 +126,7 @@ def test_multimodal_abstention_guard():
         "top_k": 3
     })
     data4 = search_resp4.get("data", [])
-    assert len(data4) == 0, f"Expected empty list for Chinese abstention query, got {len(data4)} items"
+    assert len(data4) == 0 or data4[0].get("id") == "unmentioned_abstention_notice", f"Expected abstention notice or empty list, got {data4}"
     print("PASS: Chinese abstention guard successfully suppressed irrelevant candidates.")
 
 
