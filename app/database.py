@@ -872,9 +872,12 @@ def search_hybrid(
                 # If the query specifically targets a module or file (e.g. timeseries or core.py),
                 # but this diff belongs to a completely different file/module AND has no symbol match:
                 # HEAVILY PENALIZE the unrelated diff to prevent cross-task patch poisoning!
-                mismatched_diff = bool((q_modules or q_file_mentions) and diff_files and not file_matched and not symbol_matched)
+                if q_file_mentions and diff_files and not file_matched:
+                    mismatched_diff = True
+                else:
+                    mismatched_diff = bool((q_modules or q_file_mentions) and diff_files and not file_matched and not symbol_matched)
 
-                if file_matched or symbol_matched:
+                if file_matched or (symbol_matched and not mismatched_diff):
                     base_score += 0.50
                     if any(q in query_lower for q in ["patch", "fix", "solution", "diff", "code", "method", "function", "typeerror", "error", "bug"]):
                         base_score += 0.55
@@ -980,6 +983,10 @@ def search_hybrid(
                 # Subtract baseline background noise floor (unrelated sentences hover around 0.35-0.48)
                 # Question-answer semantic alignment with hypernyms/synonyms exceeds 0.50
                 calibrated_sim = max(0.0, (raw_sim - 0.50) / 0.50)
+                # In coding queries, dense vector similarity must not elevate candidates with zero symbol or file match
+                b_score_c = bm25_scores.get(c["id"], 0.0)
+                if is_code_q and b_score_c < 0.05 and not (specific_symbols and any(sym in c["content"].lower() for sym in specific_symbols)):
+                    calibrated_sim *= 0.15
                 c["score"] += (DENSE_WEIGHT * calibrated_sim * c.get("noise_mult", 1.0))
             c["score"] = round(float(c["score"]), 4)
 
