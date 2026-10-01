@@ -552,24 +552,16 @@ def search_hybrid(
                     return make_unmentioned_notice(query_text)
 
         # Predicate-level Abstention Guard:
-        # Separate named entities from question predicates (attributes/actions/objects).
-        # If the queried entity exists, but the questioned attribute has ZERO mention in memory, abstain immediately.
+        # Predicate-level Abstention Guard:
+        # If an explicit named entity (e.g. capitalized "Alex2024", "Bob") is matched,
+        # but the questioned attributes/predicates have ZERO mention in memory, abstain immediately.
         salient_ents_lower = {w.lower() for w in re.findall(r"\b[A-Z][a-zA-Z0-9_]{2,}\b", query_text)}
-        ZH_Q_STOP = {"什么", "哪儿", "哪里", "哪个", "哪些", "谁的", "何时", "怎么", "怎样", "为何", "是否", "能否", "有没有", "提到", "说起", "关于", "是什么"}
-        
-        # Identify matched entity bigrams to prevent them from acting as predicates
-        matched_zh_bi = [b for b in zh_q_bi if b in all_user_zh_bi]
-        entity_zh_bi = set(matched_zh_bi[:2]) if len(matched_zh_bi) >= 2 else set()
-
-        en_predicates = [w for w in en_q if w not in salient_ents_lower and len(w) >= 3]
-        zh_predicates = [b for b in zh_q_bi if b not in entity_zh_bi and not any(stop in b for stop in ZH_Q_STOP)]
-        
-        total_predicates = len(en_predicates) + len(zh_predicates)
-        if (query_is_zh or not can_use_dense) and shares_script and not has_opt_match and total_predicates >= 2:
-            matched_pred = sum(1 for t in en_predicates if t in all_user_en or get_stem(t) in all_user_stems) + \
-                           sum(1 for t in zh_predicates if t in all_user_zh_bi)
-            if matched_pred == 0:
-                return make_unmentioned_notice(query_text)
+        if salient_ents_lower:
+            en_predicates = [w for w in en_q if w not in salient_ents_lower and len(w) >= 3]
+            if len(en_predicates) >= 2 and not has_opt_match:
+                matched_pred = sum(1 for t in en_predicates if t in all_user_en or get_stem(t) in all_user_stems)
+                if matched_pred == 0:
+                    return make_unmentioned_notice(query_text)
 
     # 1. BM25 scoring on question query using inverted index (query-calibrated against missing terms)
     bm25 = get_or_build_bm25_index(user_id, rows)
