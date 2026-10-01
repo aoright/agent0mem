@@ -591,11 +591,12 @@ def search_hybrid(
             w for w in re.findall(r"\b[a-zA-Z0-9]+_[a-zA-Z0-9_]+\b", query_lower)
             if len(w) >= 4 and w not in GENERIC_CODE_TERMS
         }
-        has_specific_symbol = bool(specific_symbols and any(sym in content_lower for sym in specific_symbols))
-        if has_specific_symbol:
-            base_score += 0.45
-        elif specific_symbols and item_type == "proposition":
-            base_score -= (0.28 * rel_factor)
+        if specific_symbols:
+            matched_specific = sum(1 for sym in specific_symbols if sym in content_lower)
+            if matched_specific > 0:
+                base_score += 0.40 * matched_specific
+            if item_type == "proposition" and matched_specific < len(specific_symbols):
+                base_score -= (0.28 * rel_factor)
 
         has_diff = any(k in content for k in ["diff --git", "--- a/", "+++ b/", "@@ -", "```diff", "[Code Patch / Solution]"])
 
@@ -648,7 +649,7 @@ def search_hybrid(
             base_score *= 0.10
         elif "__init__.py" in content and ("File created successfully" in content or "file state is current" in content):
             base_score *= 0.25
-        elif ("_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _" in content or "============================= test session starts" in content) and base_score < 1.2:
+        elif bool(re.search(r"(_\s*){10,}", content)) or "============================= test session starts" in content:
             base_score *= 0.20
 
         # Negative constraint penalty: demote items violating exclusion rules
