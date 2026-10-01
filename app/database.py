@@ -841,11 +841,11 @@ def search_hybrid(
                    (q_file_mentions and not q_modules and mentions_target_file) or \
                    (not q_file_mentions and q_modules and mentions_target_module):
                     if tool_file_match:
-                        base_score += 1.10
+                        base_score += 1.10 * rel_factor
                     elif item_type == "proposition":
-                        base_score += 0.80
+                        base_score += 0.80 * rel_factor
                     elif has_diff:
-                        base_score += 0.90
+                        base_score += 0.90 * rel_factor
                 elif q_file_mentions and q_modules and mentions_target_file and not mentions_target_module:
                     # Same filename from wrong module (e.g. timeseries/core.py when query explicitly asks for ascii/core.py)
                     base_score *= 0.25
@@ -998,7 +998,7 @@ def search_hybrid(
         top_candidates.sort(key=lambda x: x["score"], reverse=True)
 
     # 4.5 Multi-Hop Aspect & Entity Bridging (Crucial for BEAM, CLBench, and Relational Reasoning)
-    if top_candidates and top_candidates[0]["score"] > 0.01:
+    if not is_code_q and top_candidates and top_candidates[0]["score"] > 0.01:
         STOPWORDS_MH = {
             "what", "when", "where", "which", "who", "whom", "whose", "why", "how",
             "does", "did", "was", "were", "is", "are", "the", "this", "that", "these", "those",
