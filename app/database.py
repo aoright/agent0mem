@@ -623,9 +623,16 @@ def search_hybrid(
                 base_score *= 0.15
             elif b_score < 0.05:
                 base_score *= 0.50
-        # Code noise penalty for boilerplate status/task updates
-        elif any(k in content for k in ["[tool_use TaskUpdate]", "[tool_use TaskCreate]", "(Bash completed with no output)"]):
-            base_score *= 0.15
+        # Code noise penalty for boilerplate status/task updates and empty file notices
+        is_task_noise = any(k in content for k in [
+            "[tool_use TaskUpdate]", "[tool_use TaskCreate]", "[tool_use TaskList]",
+            "was created successfully on", "was updated to 'in_progress'", "was updated to 'completed'",
+            "task state is current in your workspace", "(Bash completed with no output)"
+        ])
+        if is_task_noise:
+            base_score *= 0.10
+        elif "__init__.py" in content and ("File created successfully" in content or "file state is current" in content):
+            base_score *= 0.25
         elif "============================= test session starts" in content and base_score < 0.15:
             base_score *= 0.20
 
