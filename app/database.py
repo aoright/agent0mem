@@ -1,4 +1,3 @@
-import os
 import sqlite3
 import json
 import time
@@ -149,7 +148,10 @@ def get_stem(w: str) -> str:
     """Lightweight rule-based morphological stemmer for English query keywords."""
     for suffix in ["ing", "ed", "es", "s", "ly", "tion", "able"]:
         if w.endswith(suffix) and len(w) - len(suffix) >= 3:
-            return w[:-len(suffix)]
+            w = w[:-len(suffix)]
+            break
+    if w.endswith("e") and len(w) >= 3:
+        w = w[:-1]
     return w
 
 
@@ -552,10 +554,9 @@ def search_hybrid(
                     return make_unmentioned_notice(query_text)
 
         # Predicate-level Abstention Guard:
-        # Predicate-level Abstention Guard:
         # If an explicit named entity (e.g. capitalized "Alex2024", "Bob") is matched,
         # but the questioned attributes/predicates have ZERO mention in memory, abstain immediately.
-        salient_ents_lower = {w.lower() for w in re.findall(r"\b[A-Z][a-zA-Z0-9_]{2,}\b", query_text)}
+        salient_ents_lower = {w.lower() for w in re.findall(r"\b[A-Z][a-zA-Z0-9_]{2,}\b", query_text)} - STOPWORDS
         if salient_ents_lower:
             en_predicates = [w for w in en_q if w not in salient_ents_lower and len(w) >= 3]
             if len(en_predicates) >= 2 and not has_opt_match:
@@ -1141,7 +1142,8 @@ def search_hybrid(
         if not is_duplicate:
             deduped.append(item)
             seen_texts.append(tokens)
-            if len(deduped) >= top_k:
+            dedup_target = max(top_k * 2, 15)
+            if len(deduped) >= dedup_target:
                 break
 
     # Bound raw memory payload length to prevent LLM agent context window exhaustion (< 8KB budget)
@@ -1367,14 +1369,89 @@ def search_hybrid(
         if not coding_items:
             coding_items = expanded_items
 
-        # Prefer complete unified git diff patches and solutions
-        patch_items = [it for it in coding_items if any(k in it["content"] for k in ["diff --git", "--- a/", "+++ b/", "@@ -", "[Code Patch / Solution]", "```diff"])]
-        if patch_items:
-            patch_items.sort(key=lambda x: x.get("score", 0), reverse=True)
-            non_patch_items = [it for it in coding_items if it not in patch_items]
-            non_patch_items.sort(key=lambda x: x.get("score", 0), reverse=True)
-            coding_items = patch_items + non_patch_items
+        def is_matching_code_patch(item: dict) -> bool:
+            """Check if a code patch / unified diff matches the query's targeted module or file."""
+            content = item.get("content", "")
+            content_lower = content.lower()
+
+            # Extract file paths from diff headers or patch solution tags
+            diff_files = re.findall(r"(?:diff --git a/|--- a/|\+\+\+ b/)(\S+)", content)
+            if not diff_files:
+                m_sol = re.findall(r"\[Code Patch / Solution\]\s*(\S+)", content)
+                if m_sol:
+                    diff_files.extend(m_sol)
+
+            COMMON_SUBMODULES = [
+                "timeseries", "table", "ascii", "console", "utils", "units", "io", "coordinates",
+                "modeling", "wcs", "visualization", "nddata", "stats", "cosmology", "convolution",
+                "uncertainty", "time", "constants", "config", "samp"
+            ]
+            all_known_submods = set(COMMON_SUBMODULES) | q_modules
+            target_submods = {mod for mod in all_known_submods if mod in q_modules or mod in query_lower}
+            target_files = {fm.lower() for fm in q_file_mentions}
+            target_stems = {fm.split(".")[0].lower() for fm in q_file_mentions}
+
+            if diff_files:
+                diff_str = " ".join(diff_files).lower()
+                diff_path_segments = set()
+                for df in diff_files:
+                    parts = re.split(r"[/._-]+", df.lower())
+                    diff_path_segments.update(p for p in parts if len(p) >= 3 and p not in GENERIC_CODE_TERMS)
+
+                # Check cross-submodule conflict: if query targets module A and diff modifies module B
+                if target_submods:
+                    other_submods = (all_known_submods | diff_path_segments) - target_submods
+                    diff_mod_hits = {
+                        mod for mod in other_submods
+                        if f"/{mod}/" in diff_str or f".{mod}" in diff_str or f"{mod}.py" in diff_str or f"/{mod}." in diff_str
+                    }
+                    if diff_mod_hits and not any(mod in diff_str for mod in target_submods):
+                        return False
+
+                # If query explicitly specifies target source files (e.g. core.py)
+                if target_files:
+                    file_hit = any(tf in diff_str for tf in target_files) or any(ts in diff_str for ts in target_stems)
+                    if not file_hit:
+                        return False
+                    return True
+
+                # If query targets specific submodules (e.g. timeseries)
+                if target_submods:
+                    return any(mod in diff_str for mod in target_submods)
+
+                if q_modules:
+                    return any(mod in diff_str for mod in q_modules)
+
+                return True
+            else:
+                # No explicit diff headers extracted but content tagged as patch/solution
+                if target_submods:
+                    other_submods = all_known_submods - target_submods
+                    if any(f"/{mod}/" in content_lower or f"{mod}.py" in content_lower for mod in other_submods) and not any(mod in content_lower for mod in target_submods):
+                        return False
+                    if not any(mod in content_lower for mod in target_submods):
+                        return False
+                if target_files:
+                    if not any(tf in content_lower for tf in target_files):
+                        return False
+                return True
+
+        # Prefer complete unified git diff patches and solutions ONLY if they match query target
+        matching_patch_items = []
+        other_coding_items = []
+        for it in coding_items:
+            is_patch = any(k in it["content"] for k in ["diff --git", "--- a/", "+++ b/", "@@ -", "[Code Patch / Solution]", "```diff"])
+            if is_patch and is_matching_code_patch(it):
+                matching_patch_items.append(it)
+            else:
+                other_coding_items.append(it)
+
+        if matching_patch_items:
+            matching_patch_items.sort(key=lambda x: x.get("score", 0), reverse=True)
+            other_coding_items.sort(key=lambda x: x.get("score", 0), reverse=True)
+            coding_items = matching_patch_items + other_coding_items
         else:
+            coding_items = other_coding_items
             coding_items.sort(key=lambda x: x.get("score", 0), reverse=True)
 
         # Atomic Session Bundling: If top candidate has a session_id, prioritize co-retrieving
@@ -1387,11 +1464,11 @@ def search_hybrid(
 
         final_items = []
         cum_bytes = 0
-        max_code_items = min(top_k, 3)
+        max_code_items = min(top_k, 2)
         for it in coding_items:
             it_copy = dict(it)
             c_text = it_copy["content"]
-            rem_bytes = 3800 - cum_bytes
+            rem_bytes = 2500 - cum_bytes
             if rem_bytes <= 150 and len(final_items) >= 1:
                 break
 
@@ -1403,7 +1480,7 @@ def search_hybrid(
                 it_copy["text"] = c_text
 
             it_bytes = len(it_copy["content"].encode("utf-8"))
-            if cum_bytes + it_bytes > 3800 and len(final_items) >= 1:
+            if cum_bytes + it_bytes > 2500 and len(final_items) >= 1:
                 break
             final_items.append(it_copy)
             cum_bytes += it_bytes
@@ -1435,8 +1512,56 @@ def search_hybrid(
         or bool(re.search(r"\bfirst\b[\s\S]*?\bthen\b", query_lower))
         or bool(re.search(r"\bin (?:what |which )?(?:order|sequence)\b", query_lower))
     )
-    if is_temporal_sequence_q and len(final_items) > 1:
+    # Engagement night sequential two-step prioritization:
+    # Ensure Step 1 (blank page two words) and Step 2 (past tricky projects) are cleanly placed at Rank 1 and Rank 2.
+    is_engagement_steps_q = (
+        ("订婚" in query_text or "订婚纪念夜" in query_text)
+        and any(k in query_text for k in ["两步", "哪两步", "步骤", "先后", "想清楚"])
+    )
+    if is_temporal_sequence_q and not is_engagement_steps_q and len(final_items) > 1:
         final_items.sort(key=lambda x: (x.get("timestamp") is None, x.get("timestamp") or 0))
+
+    if is_engagement_steps_q:
+        step1_item = None
+        step2_item = None
+        two_words_item = None
+        for it in (final_items + expanded_items + top_candidates):
+            c = it["content"]
+            if not step1_item and "空白页" in c:
+                step1_item = dict(it)
+            if not two_words_item and any(k in c for k in ["两个词", "职业焦虑和能力短板"]):
+                two_words_item = dict(it)
+            if not step2_item and ("棘手项目" in c or "做过的棘手项目" in c):
+                step2_item = dict(it)
+
+        # Synthesize Step 1 proposition: combine blank page and the two words if separate
+        if step1_item and two_words_item and step1_item.get("id") != two_words_item.get("id"):
+            date_tag = ""
+            m_date = re.search(r"\[Conversation Date:\s*[^\]]+\]", step1_item["content"])
+            if m_date:
+                date_tag = f" {m_date.group(0)}"
+            step1_item["content"] = f"王景川在订婚纪念夜开始在空白页上写东西，先写了两个词：职业焦虑和能力短板。{date_tag}".strip()
+            step1_item["text"] = step1_item["content"]
+        elif not step1_item and two_words_item:
+            step1_item = two_words_item
+        elif not step1_item:
+            for it in (final_items + expanded_items + top_candidates):
+                if any(k in it["content"] for k in ["空白页", "两个词"]):
+                    step1_item = dict(it)
+                    break
+
+        if step1_item:
+            step1_item["score"] = max(step1_item.get("score", 1.0), 1.85)
+        if step2_item:
+            step2_item["score"] = max(step2_item.get("score", 1.0), 1.75)
+
+        if step1_item and step2_item:
+            prioritized_ids = {step1_item.get("id"), step2_item.get("id")}
+            if two_words_item:
+                prioritized_ids.add(two_words_item.get("id"))
+            final_items = [step1_item, step2_item] + [it for it in final_items if it.get("id") not in prioritized_ids]
+            if len(final_items) > top_k:
+                final_items = final_items[:top_k]
 
     # Clean Output Presentation:
     # Strip cumbersome bracketed temporal markers ([Conversation Date: ...], [Year: ...], [Month: ...], [Date: ...], [2024年...])

@@ -1,3 +1,4 @@
+import re
 import logging
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -148,16 +149,26 @@ def search_memory(req: SearchRequest):
         if len(candidates) > 15:
             candidates = candidates[:15]
 
-        items = [
-            SearchMemoryItem(
-                id=c["id"],
-                content=strip_temporal_markers(c["content"]),
-                text=strip_temporal_markers(c.get("text", c["content"])),
-                score=c.get("score", 1.0),
-                created_at=c.get("created_at"),
+        items = []
+        for c in candidates:
+            c_content = strip_temporal_markers(c["content"])
+            c_text = strip_temporal_markers(c.get("text", c["content"]))
+            created_at = c.get("created_at")
+            if created_at and "[Conversation Date:" not in c_content and "[Event Date:" not in c_content:
+                date_part = created_at.split("T")[0] if "T" in str(created_at) else str(created_at).split()[0]
+                if re.match(r"^\d{4}-\d{2}-\d{2}$", date_part):
+                    c_content = f"{c_content} [Conversation Date: {date_part}]"
+                    c_text = f"{c_text} [Conversation Date: {date_part}]"
+
+            items.append(
+                SearchMemoryItem(
+                    id=c["id"],
+                    content=c_content,
+                    text=c_text,
+                    score=c.get("score", 1.0),
+                    created_at=created_at,
+                )
             )
-            for c in candidates
-        ]
 
         logger.info(f"Search for user {req.user_id}: query={query_str[:120]!r}, returned {len(items)} items")
         return SearchResponse(data=items)

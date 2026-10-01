@@ -13,8 +13,6 @@ Tests:
 
 import sys
 import os
-import time
-import json
 import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -202,11 +200,23 @@ def test_temporal_sequence_sorting():
 
 
 def test_clean_output_presentation():
-    """Verify cumbersome bracketed temporal markers are stripped while created_at is preserved."""
+    """Verify redundant bracketed temporal markers are stripped while conversation dates and created_at are preserved."""
     raw_text = "I bought a coffee maker for $150.00. [Conversation Date: 2024-05-10] [Year: 2024] [Month: May] [Date: May 10, 2024] [2024年5月]"
     cleaned = strip_temporal_markers(raw_text)
-    assert cleaned == "I bought a coffee maker for $150.00.", f"Failed to clean text cleanly: '{cleaned}'"
+    assert cleaned == "I bought a coffee maker for $150.00. [Conversation Date: 2024-05-10]", f"Failed to preserve date: '{cleaned}'"
     assert "$150.00" in cleaned
+    assert "[Conversation Date: 2024-05-10]" in cleaned
+    assert "[Year:" not in cleaned
+    assert "[Month:" not in cleaned
+    assert "[Date:" not in cleaned
+
+    # Test preserving sole date when only [Date: ...] is present
+    raw_sole = "User attended conference in London. [Date: October 15, 2022] [Year: 2022] [Month: October]"
+    cleaned_sole = strip_temporal_markers(raw_sole)
+    assert "October 15, 2022" in cleaned_sole, f"Failed to preserve sole date: '{cleaned_sole}'"
+    assert "[Conversation Date: October 15, 2022]" in cleaned_sole
+    assert "[Year:" not in cleaned_sole
+    assert "[Month:" not in cleaned_sole
 
     user_id = "test_user_clean_out"
     save_memories_batch(
@@ -224,10 +234,81 @@ def test_clean_output_presentation():
     results = search_hybrid(user_id=user_id, query_text="How much was the espresso machine?", top_k=1)
     assert len(results) > 0
     top = results[0]
-    assert "[Conversation Date:" not in top["content"]
+    assert "[Conversation Date: 2024-05-10]" in top["content"]
     assert "[Year:" not in top["content"]
     assert "[Month:" not in top["content"]
     assert "[Date:" not in top["content"]
     assert "$150.00" in top["content"]
     # Verify metadata is preserved
     assert top.get("created_at") is not None
+
+
+def test_mismatched_patch_not_promoted():
+    """Verify that when query targets astropy/timeseries/core.py, an unrelated patch for table.py is not promoted to Rank 1."""
+    user_id = "test_user_mismatch_patch"
+    
+    table_patch = """diff --git a/astropy/table/table.py b/astropy/table/table.py
+--- a/astropy/table/table.py
++++ b/astropy/table/table.py
+@@ -100,6 +100,8 @@ def to_pandas(self):
++    if index_name:
++        del self.columns[index_name]
+"""
+    timeseries_prop = "In astropy/timeseries/core.py, _check_required_columns raises an error when required columns are removed."
+
+    save_memories_batch(
+        request_id="req_mismatch_1",
+        user_id=user_id,
+        session_id="sess_mismatch",
+        raw_messages=[
+            {"role": "assistant", "content": table_patch, "timestamp": 1628188560}
+        ],
+        propositions=[
+            "[Code Patch / Solution] " + table_patch,
+            timeseries_prop
+        ]
+    )
+
+    results = search_hybrid(
+        user_id=user_id,
+        query_text="timeseries core.py _check_required_columns fix missing required column test",
+        top_k=3
+    )
+    assert len(results) > 0
+    assert "table.py" not in results[0]["content"], f"Mismatched table.py patch promoted to Rank 1! Got: {results[0]['content']}"
+    assert "timeseries" in results[0]["content"], f"Expected timeseries proposition at Rank 1, got: {results[0]['content']}"
+
+
+def test_engagement_night_two_step_prioritization():
+    """Verify that sequential steps queries for engagement night place synthesized Step 1 and Step 2 at Rank 1 and 2."""
+    user_id = "test_user_engagement_steps"
+    
+    prop_blank = "王景川在订婚纪念夜开始在空白页上写东西。"
+    prop_words = "王景川先写了两个词：职业焦虑和能力短板。"
+    step_2 = "王景川在订婚纪念夜翻出了以前做过的棘手项目，发现很多问题都能对应到那些短板上。"
+    distractor = "王景川在订婚纪念夜列出来的短板包括行业政策理解、数据分析和团队沟通。"
+
+    save_memories_batch(
+        request_id="req_eng_1",
+        user_id=user_id,
+        session_id="sess_eng",
+        raw_messages=[
+            {"role": "user", "content": distractor, "timestamp": 1704153600},
+            {"role": "user", "content": prop_blank, "timestamp": 1704153610},
+            {"role": "user", "content": prop_words, "timestamp": 1704153615},
+            {"role": "user", "content": step_2, "timestamp": 1704153620},
+        ],
+        propositions=[distractor, prop_blank, prop_words, step_2]
+    )
+
+    results = search_hybrid(
+        user_id=user_id,
+        query_text="订婚纪念夜那晚，我先后做了哪两步，才慢慢把职业焦虑想清楚？",
+        top_k=3
+    )
+    assert len(results) >= 2
+    # Verify Step 1 is synthesized with both blank page and the two words
+    assert "空白页" in results[0]["content"] and "两个词" in results[0]["content"], f"Rank 1 should be synthesized Step 1, got: {results[0]['content']}"
+    # Verify Step 2 is past tricky projects
+    assert "棘手项目" in results[1]["content"], f"Rank 2 should be Step 2, got: {results[1]['content']}"
+

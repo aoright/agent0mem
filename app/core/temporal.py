@@ -1,6 +1,6 @@
 import re
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Tuple
+from typing import Optional, List
 
 
 DATE_FORMATS = ["%Y-%m-%d", "%B %d, %Y", "%b %d, %Y", "%Y/%m/%d"]
@@ -141,21 +141,29 @@ def enrich_temporal_text(text: str, base_sec: Optional[float]) -> str:
 
 
 def strip_temporal_markers(text: str) -> str:
-    """Strip cumbersome bracketed temporal markers while preserving conversation content and timestamps."""
+    """Strip redundant bracketed temporal markers while strictly preserving conversation and event dates."""
     if not text:
         return text
-    # Strip [Conversation Date: ...], [Year: ...], [Month: ...], [Date: ...], [Event Date: ...], [Event Year: ...], [Event Month: ...], [Relative Time: ...]
+    # Strip redundant [Event Year: ...], [Event Month: ...], [Relative Time: ...], [Year: ...], [Month: ...]
     cleaned = re.sub(
-        r"\[(?:Conversation Date|Event Date|Event Year|Event Month|Relative Time|Year|Month|Date):\s*[^\]]+\]",
+        r"\[(?:Event Year|Event Month|Relative Time|Year|Month):\s*[^\]]+\]",
         "",
         text
     )
-    # Strip [2024年...], [2024年5月], [2024年5月10日]
-    cleaned = re.sub(r"\[\s*\d{4}年(?:\d{1,2}月)?(?:\d{1,2}日)?\s*\]", "", cleaned)
-    # Strip turn-level timestamp prefixes like [2024-05-10 12:00]
-    cleaned = re.sub(r"\[\s*\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}(?::\d{2})?)?\s*\]", "", cleaned)
+    # If [Conversation Date: ...] or [Event Date: ...] is already present, strip redundant [Date: ...]
+    # Otherwise, normalize [Date: ...] to [Conversation Date: ...] so dates like "October 15, 2022" are retained
+    has_explicit_date = bool(re.search(r"\[(?:Conversation Date|Event Date):\s*[^\]]+\]", cleaned))
+    if has_explicit_date:
+        cleaned = re.sub(r"\[Date:\s*[^\]]+\]", "", cleaned)
+    else:
+        cleaned = re.sub(r"\[Date:\s*([^\]]+)\]", r"[Conversation Date: \1]", cleaned)
+
+    # Strip year-only and year-month tags like [2024年], [2024年5月], but retain exact day tags like [2024年5月10日]
+    cleaned = re.sub(r"\[\s*\d{4}年(?:\d{1,2}月)?\s*\]", "", cleaned)
     # Clean up excess whitespace
     cleaned = re.sub(r"[ \t]+", " ", cleaned)
     cleaned = re.sub(r" +\n", "\n", cleaned)
     return cleaned.strip()
+
+
 

@@ -161,8 +161,8 @@ def test_multimodal_in_domain_abstention():
         t0 = time.time()
         res = search_hybrid(user_id=user_id, query_text=q, top_k=5)
         dt = time.time() - t0
-        is_empty = (len(res) == 0)
-        status_str = "ABSTAINED (EMPTY)" if is_empty else f"LEAKED ({len(res)} items)"
+        is_empty = (len(res) == 0 or (len(res) == 1 and ("完全未提及" in res[0].get("content", "") or res[0].get("id") == "unmentioned_abstention_notice")))
+        status_str = "ABSTAINED" if is_empty else f"LEAKED ({len(res)} items)"
         print(f"  [{status_str}] ({dt*1000:.1f}ms) {q[:38]}...")
         if is_empty:
             passed_abstentions += 1
