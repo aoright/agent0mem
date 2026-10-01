@@ -653,6 +653,12 @@ def search_hybrid(
         w for w in re.findall(r"\b[a-zA-Z0-9]+_[a-zA-Z0-9_]+\b", query_lower)
         if len(w) >= 4 and w not in GENERIC_CODE_TERMS
     }
+    target_methods = {
+        (f[0] or f[1]).lower()
+        for f in re.findall(r"\b(?:method|function|def|class)\s+([a-zA-Z0-9_]+)\b|\b([a-zA-Z0-9_]+)\s*(?:\(\)|\s+(?:method|function))\b", query_lower)
+        if (f[0] or f[1]).lower() not in GENERIC_CODE_TERMS and len(f[0] or f[1]) >= 3
+    }
+    specific_symbols.update(target_methods)
 
     # Fast candidate pruning on large collections:
     # Documents with 0 lexical overlap that are neither recent nor match domain modalities
@@ -856,11 +862,11 @@ def search_hybrid(
                             file_matched = True
                             break
 
-                # Exact symbol match (must be a true identifier: containing '_' or from PascalCase query tokens, excluding the queried module name itself)
+                # Exact symbol match (must be a true identifier: containing '_' or from target_methods or PascalCase query tokens, excluding the queried module name itself)
                 code_content_lower = content_lower
                 symbol_matched = any(
                     term in code_content_lower for term in q_code_substantive
-                    if len(term) >= 4 and ("_" in term or (term in query_pascal_terms and term not in q_modules))
+                    if len(term) >= 3 and ("_" in term or term in target_methods or (term in query_pascal_terms and term not in q_modules))
                 )
 
                 # If the query specifically targets a module or file (e.g. timeseries or core.py),
@@ -877,32 +883,52 @@ def search_hybrid(
                     base_score *= 0.15
                 elif b_score < 0.05:
                     base_score *= 0.50
-        # Code noise penalty for boilerplate status/task updates and empty file notices
+        # Code noise penalty for boilerplate status/task updates, empty file notices, and uninformative thinking dumps
         is_task_noise = any(k in content for k in [
             "[tool_use TaskUpdate]", "[tool_use TaskCreate]", "[tool_use TaskList]",
             "was created successfully on", "was updated to 'in_progress'", "was updated to 'completed'",
-            "task state is current in your workspace", "(Bash completed with no output)"
+            "task state is current in your workspace", "file state is current in your context",
+            "(Bash completed with no output)"
         ])
-        is_pure_thinking = content.strip().startswith("[thinking]") and not any(k in content for k in ["[tool_use ", "diff --git", "[Code Patch / Solution]"])
+        is_pure_thinking = "[thinking]" in content and not any(k in content for k in ["[tool_use ", "diff --git", "[Code Patch / Solution]"])
+        has_diff = any(k in content for k in ["diff --git", "--- a/", "+++ b/", "```diff", "[Code Patch / Solution]"])
+
+        is_resolution = any(k in content_lower for k in [
+            "was modified to address the issue", "was resolved by", "diff --git",
+            "[code patch / solution]", "the fix adds", "the fix modifies", "the patch resolves",
+            "i have created the fix", "i resolved the issue by"
+        ])
+        is_problem_only = any(k in content_lower for k in [
+            "raises a typeerror", "raises typeerror", "raises an exception", "fails with",
+            "issue is that", "bug is that", "error occurs when", "has a bug where"
+        ]) and not is_resolution and not has_diff
+
         noise_mult = 1.0
         if is_task_noise:
             noise_mult = 0.10
         elif "__init__.py" in content and ("File created successfully" in content or "file state is current" in content):
-            noise_mult = 0.25
+            noise_mult = 0.20
         elif bool(re.search(r"(_\s*){10,}", content)) or "============================= test session starts" in content:
             noise_mult = 0.20
+        elif is_pure_thinking and is_code_q:
+            noise_mult = 0.20
         elif is_pure_thinking and (q_code_substantive or q_file_mentions or q_modules):
-            noise_mult = 0.65
+            noise_mult = 0.40
+        elif is_code_q and item_type == "raw" and not has_diff and len(content) > 2500:
+            noise_mult = 0.25
 
         # Demote SWE-bench problem prompts that regurgitate the issue description without containing solutions/patches
         is_problem_prompt = content.startswith("# Issue") and any(k in content for k in ["# Your task", "The repository is checked out at", "Investigate the issue above"])
         if is_problem_prompt:
+            noise_mult = min(noise_mult, 0.30)
+
+        # Demote propositions that only state the bug without providing the resolution
+        if is_problem_only and is_code_q:
             noise_mult = min(noise_mult, 0.40)
 
         # Elevate concrete resolution propositions and code diffs
-        is_resolution = any(k in content for k in ["was modified to address the issue", "was resolved by", "diff --git", "[Code Patch / Solution]"])
         if is_resolution and b_score > 0.001:
-            base_score += 0.35
+            base_score += 0.65
 
         base_score *= noise_mult
 
@@ -1024,6 +1050,12 @@ def search_hybrid(
             seen_texts.append(tokens)
             if len(deduped) >= top_k:
                 break
+
+    # Bound raw memory payload length to prevent LLM agent context window exhaustion (< 8KB budget)
+    for item in deduped:
+        if item.get("item_type") == "raw" and len(item.get("content", "")) > 2200 and not any(k in item.get("content", "") for k in ["diff --git", "[Code Patch / Solution]"]):
+            item["content"] = item["content"][:2200] + "\n... [Context Truncated for Agent Budget]"
+            item["text"] = item["content"]
 
     # Abstention guard: if the best candidate has virtually no semantic or lexical overlap, return explicit notice
     # This enables downstream answer generators to abstain correctly on unanswerable/out-of-scope questions
