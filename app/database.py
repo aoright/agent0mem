@@ -655,12 +655,18 @@ def search_hybrid(
             "was created successfully on", "was updated to 'in_progress'", "was updated to 'completed'",
             "task state is current in your workspace", "(Bash completed with no output)"
         ])
+        is_pure_thinking = content.strip().startswith("[thinking]") and not any(k in content for k in ["[tool_use ", "diff --git", "[Code Patch / Solution]"])
+        noise_mult = 1.0
         if is_task_noise:
-            base_score *= 0.10
+            noise_mult = 0.10
         elif "__init__.py" in content and ("File created successfully" in content or "file state is current" in content):
-            base_score *= 0.25
+            noise_mult = 0.25
         elif bool(re.search(r"(_\s*){10,}", content)) or "============================= test session starts" in content:
-            base_score *= 0.20
+            noise_mult = 0.20
+        elif is_pure_thinking and (q_code_substantive or q_file_mentions or q_modules):
+            noise_mult = 0.65
+
+        base_score *= noise_mult
 
         # Negative constraint penalty: demote items violating exclusion rules
         if negative_terms:
@@ -672,6 +678,7 @@ def search_hybrid(
             "content": content,
             "text": content,
             "score": base_score,
+            "noise_mult": noise_mult,
             "created_at": row["created_at"],
             "timestamp": ts,
             "item_type": item_type
@@ -708,7 +715,7 @@ def search_hybrid(
                 # Subtract baseline background noise floor (unrelated sentences hover around 0.35-0.48)
                 # Question-answer semantic alignment with hypernyms/synonyms exceeds 0.50
                 calibrated_sim = max(0.0, (raw_sim - 0.50) / 0.50)
-                c["score"] += (DENSE_WEIGHT * calibrated_sim)
+                c["score"] += (DENSE_WEIGHT * calibrated_sim * c.get("noise_mult", 1.0))
             c["score"] = round(float(c["score"]), 4)
 
         top_candidates.sort(key=lambda x: x["score"], reverse=True)
