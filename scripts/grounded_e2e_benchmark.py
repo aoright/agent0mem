@@ -403,11 +403,40 @@ save_memories_batch("beam_s1", uid_beam, "s1", [{"role": "user", "content": "I a
 save_memories_batch("beam_s2", uid_beam, "s2", [{"role": "user", "content": "The vet diagnosed Max with hip dysplasia after his morning walk.", "timestamp": 1680500000}], ["The vet diagnosed Max with hip dysplasia after his morning walk."])
 res_beam = search_hybrid(uid_beam, "What medical condition was my golden retriever diagnosed with?", top_k=3)
 
+# Test 5: ScriptMem Dual-Speaker Multi-Agent Isolation
+uid_script = "scriptmem_speaker_iso_test"
+save_memories_batch("script_s1", uid_script, "s_alice", [{"role": "user", "content": "Alice bought a vintage Leica M3 rangefinder camera in Berlin.", "timestamp": 1700000000}], ["Alice purchased a vintage Leica M3 rangefinder camera in Berlin."])
+save_memories_batch("script_s2", uid_script, "s_bob", [{"role": "user", "content": "Bob bought a Sony A7 IV mirrorless camera for bird photography.", "timestamp": 1700100000}], ["Bob purchased a Sony A7 IV mirrorless camera for bird photography."])
+res_alice = search_hybrid(uid_script, "Which camera model did Alice acquire?", top_k=2)
+res_bob = search_hybrid(uid_script, "Which camera model did Bob choose for bird photography?", top_k=2)
+
+# Test 6: CLBench / PersonaMem MCQ Option Matching & Abstention Guard
+uid_mcq = "clbench_mcq_abstain_test"
+save_memories_batch("mcq_s1", uid_mcq, "s1", [{"role": "user", "content": "Elena specializes in distributed fault-tolerant systems using Erlang and Elixir.", "timestamp": 1710000000}], ["Elena specializes in distributed systems using Erlang and Elixir."])
+# Case 6A: Abstract query with matching candidate options (must NOT falsely abstain)
+res_mcq_match = search_hybrid(
+    uid_mcq,
+    "Which backend ecosystem does Elena focus on for high availability?",
+    top_k=2,
+    options=["Python / Django", "Ruby on Rails", "Erlang / Elixir", "Cannot infer"]
+)
+# Case 6B: Unmentioned query with non-matching options (must cleanly abstain)
+res_mcq_abstain = search_hybrid(
+    uid_mcq,
+    "What is Elena's favorite dessert when dining out at restaurants?",
+    top_k=2,
+    options=["Chocolate Lava Cake", "Matcha Tiramisu", "Strawberry Tart", "Cannot infer"]
+)
+
 out = {
     "temporal_top": res_time[0]['content'] if res_time else "",
     "negative_top": [r['content'] for r in res_neg],
     "state_top": res_state[0]['content'] if res_state else "",
-    "beam_items": [r['content'] for r in res_beam]
+    "beam_items": [r['content'] for r in res_beam],
+    "alice_top": res_alice[0]['content'] if res_alice else "",
+    "bob_top": res_bob[0]['content'] if res_bob else "",
+    "mcq_match_top": res_mcq_match[0]['content'] if res_mcq_match else "",
+    "mcq_abstain_top": res_mcq_abstain[0]['content'] if res_mcq_abstain else ""
 }
 print(json.dumps(out))
 """
@@ -416,6 +445,10 @@ print(json.dumps(out))
     n_top = raw_data.get("negative_top", [])
     s_top = raw_data.get("state_top", "")
     b_items = raw_data.get("beam_items", [])
+    alice_top = raw_data.get("alice_top", "")
+    bob_top = raw_data.get("bob_top", "")
+    mcq_match_top = raw_data.get("mcq_match_top", "")
+    mcq_abstain_top = raw_data.get("mcq_abstain_top", "")
 
     # 1. LoCoMo Temporal: Must have exact DAY string and must NOT have false hours/seconds
     has_exact_day = "2024-07-01" in t_top or "July 01, 2024" in t_top or "July 1, 2024" in t_top
@@ -439,7 +472,26 @@ print(json.dumps(out))
     beam_pass = beam_has_entity and beam_has_diag
     print(f"  [{'PASS' if beam_pass else 'FAIL'}] BEAM Multi-Hop Relational Reasoning: Entity Bridge={beam_has_entity}, Fact Diagnosis={beam_has_diag}")
 
-    scores = [100.0 if locomo_pass else 0.0, 100.0 if personamem_pass else 0.0, 100.0 if state_pass else 0.0, 100.0 if beam_pass else 0.0]
+    # 5. ScriptMem Dual-Speaker Multi-Agent Isolation
+    alice_ok = ("leica" in alice_top.lower() or "m3" in alice_top.lower()) and "sony" not in alice_top.lower()
+    bob_ok = ("sony" in bob_top.lower() or "a7" in bob_top.lower()) and "leica" not in bob_top.lower()
+    scriptmem_pass = alice_ok and bob_ok
+    print(f"  [{'PASS' if scriptmem_pass else 'FAIL'}] ScriptMem Speaker Isolation: Alice Leica={alice_ok}, Bob Sony={bob_ok}")
+
+    # 6. CLBench / PersonaMem MCQ Option Matching & Abstention Guard
+    mcq_match_ok = ("erlang" in mcq_match_top.lower() or "elixir" in mcq_match_top.lower()) and "未提及" not in mcq_match_top
+    mcq_abstain_ok = ("未提及" in mcq_abstain_top or "cannot infer" in mcq_abstain_top.lower() or "not mentioned" in mcq_abstain_top.lower())
+    mcq_pass = mcq_match_ok and mcq_abstain_ok
+    print(f"  [{'PASS' if mcq_pass else 'FAIL'}] CLBench MCQ Option Matching: Option Match={mcq_match_ok}, True Abstention={mcq_abstain_ok}")
+
+    scores = [
+        100.0 if locomo_pass else 0.0,
+        100.0 if personamem_pass else 0.0,
+        100.0 if state_pass else 0.0,
+        100.0 if beam_pass else 0.0,
+        100.0 if scriptmem_pass else 0.0,
+        100.0 if mcq_pass else 0.0
+    ]
     composite = sum(scores) / len(scores)
 
     print("-" * 78)
@@ -447,6 +499,8 @@ print(json.dumps(out))
     print(f"  PersonaMem Negative Handling: {scores[1]:.1f}%")
     print(f"  Current State Conflict Gov:   {scores[2]:.1f}%")
     print(f"  BEAM Multi-Hop Entity Link:   {scores[3]:.1f}%")
+    print(f"  ScriptMem Speaker Isolation:  {scores[4]:.1f}%")
+    print(f"  CLBench MCQ Option Match:     {scores[5]:.1f}%")
     print(f"-> TEXTUAL COMPOSITE SCORE: {composite:.2f}% (Season High Target: > {SEASON_TARGETS['textual']}%)")
 
     return {
@@ -457,7 +511,9 @@ print(json.dumps(out))
             "locomo_score": scores[0],
             "personamem_score": scores[1],
             "state_overwrite_score": scores[2],
-            "beam_multihop_score": scores[3]
+            "beam_multihop_score": scores[3],
+            "scriptmem_score": scores[4],
+            "clbench_mcq_score": scores[5]
         }
     }
 

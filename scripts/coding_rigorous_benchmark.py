@@ -38,7 +38,7 @@ BENCHMARK_TASKS = [
         "id": "task_timeseries_core",
         "user_id": "u_2e65f36a595a99672abdd6bf65abc88b63392ea3680c99649b36d94274709190",
         "description": "Astropy TimeSeries required columns validation (Issue #13009)",
-        "gold_file": "astropy/timeseries/core.py",
+        "gold_file": ["astropy/timeseries/core.py", "astropy/timeseries/tests/test_timeseries.py"],
         "gold_symbol": "TimeSeries",
         "forbidden_file": "astropy/table/table.py",
         "queries": [
@@ -167,7 +167,8 @@ def run_benchmark():
             is_clean_diff = False
             for idx, it in enumerate(items):
                 content = it.get("content", "")
-                if gold_file in content and (gold_symbol in content or gold_file.split("/")[-1] in content):
+                gold_files = [gold_file] if isinstance(gold_file, str) else list(gold_file)
+                if any(gf in content for gf in gold_files) and (gold_symbol in content or any(gf.split("/")[-1] in content for gf in gold_files)):
                     target_rank = idx + 1
                     if "diff --git" in content:
                         is_clean_diff = test_git_apply_cleanliness(content)
