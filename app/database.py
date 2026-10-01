@@ -384,8 +384,14 @@ def search_hybrid(
             "cannot infer", "cannot be determined", "not mentioned", "none of the above",
             "not enough information", "insufficient information", "cannot be inferred"
         ]
+        def opt_in_memory(opt_text: str, mem_lower: str) -> bool:
+            if opt_text in mem_lower:
+                return True
+            tokens = [t for t in re.findall(r"[a-zA-Z0-9]+|[\u4e00-\u9fff]{2,}", opt_text) if len(t) >= 3 and t not in STOPWORDS]
+            return bool(tokens and any(t in mem_lower for t in tokens))
+
         has_opt_match = bool(clean_options and any(
-            any(opt in r["content"].lower() for opt in clean_options if not any(kw in opt for kw in ABSTAIN_KEYWORDS))
+            any(opt_in_memory(opt, r["content"].lower()) for opt in clean_options if not any(kw in opt for kw in ABSTAIN_KEYWORDS))
             for r in rows
         ))
 
@@ -416,7 +422,7 @@ def search_hybrid(
         if has_abstain_choice:
             substantive_opts = [opt for opt in clean_options if not any(kw in opt for kw in ABSTAIN_KEYWORDS)]
             if substantive_opts:
-                matched_opts_count = sum(1 for opt in substantive_opts if any(opt in r["content"].lower() for r in rows))
+                matched_opts_count = sum(1 for opt in substantive_opts if any(opt_in_memory(opt, r["content"].lower()) for r in rows))
                 if matched_opts_count == 0:
                     return make_unmentioned_notice(query_text)
 
