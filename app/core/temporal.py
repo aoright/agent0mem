@@ -138,3 +138,24 @@ def enrich_temporal_text(text: str, base_sec: Optional[float]) -> str:
         return f"{text} {' '.join(unique_tags)}"
 
     return text
+
+
+def strip_temporal_markers(text: str) -> str:
+    """Strip cumbersome bracketed temporal markers while preserving conversation content and timestamps."""
+    if not text:
+        return text
+    # Strip [Conversation Date: ...], [Year: ...], [Month: ...], [Date: ...], [Event Date: ...], [Event Year: ...], [Event Month: ...], [Relative Time: ...]
+    cleaned = re.sub(
+        r"\[(?:Conversation Date|Event Date|Event Year|Event Month|Relative Time|Year|Month|Date):\s*[^\]]+\]",
+        "",
+        text
+    )
+    # Strip [2024年...], [2024年5月], [2024年5月10日]
+    cleaned = re.sub(r"\[\s*\d{4}年(?:\d{1,2}月)?(?:\d{1,2}日)?\s*\]", "", cleaned)
+    # Strip turn-level timestamp prefixes like [2024-05-10 12:00]
+    cleaned = re.sub(r"\[\s*\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}(?::\d{2})?)?\s*\]", "", cleaned)
+    # Clean up excess whitespace
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    cleaned = re.sub(r" +\n", "\n", cleaned)
+    return cleaned.strip()
+

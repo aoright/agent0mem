@@ -12,6 +12,8 @@ from app.schemas import (
 )
 from app.database import init_db, save_memories_batch, search_hybrid
 from app.core.extractor import extract_propositions
+from app.core.temporal import strip_temporal_markers
+
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("agent0mem")
@@ -149,13 +151,14 @@ def search_memory(req: SearchRequest):
         items = [
             SearchMemoryItem(
                 id=c["id"],
-                content=c["content"],
-                text=c.get("text", c["content"]),
+                content=strip_temporal_markers(c["content"]),
+                text=strip_temporal_markers(c.get("text", c["content"])),
                 score=c.get("score", 1.0),
                 created_at=c.get("created_at"),
             )
             for c in candidates
         ]
+
         logger.info(f"Search for user {req.user_id}: query={query_str[:120]!r}, returned {len(items)} items")
         return SearchResponse(data=items)
     except Exception as e:

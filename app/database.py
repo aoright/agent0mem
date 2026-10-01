@@ -21,8 +21,9 @@ from app.config import (
 )
 from app.core.bm25 import BM25Index
 from app.core.embeddings import get_embeddings, cosine_similarity
-from app.core.temporal import enrich_temporal_text, parse_timestamp_seconds
+from app.core.temporal import enrich_temporal_text, parse_timestamp_seconds, strip_temporal_markers
 from app.core.negative_filter import extract_negative_terms, compute_negative_penalty
+from app.core.extractor import is_raw_fragmented_tool_call
 
 logger = logging.getLogger("agent0mem.database")
 
@@ -63,7 +64,8 @@ Reply with ONLY one word: 'ANSWERABLE' or 'UNANSWERABLE'."""
             ans = res.get("choices", [{}])[0].get("message", {}).get("content", "").strip().upper()
             return "UNANSWERABLE" not in ans
     except Exception:
-        return True
+        return False
+
 
 
 def make_unmentioned_notice(query: str) -> List[Dict[str, Any]]:
@@ -198,6 +200,8 @@ def save_memories_batch(
 
     # 1. Distilled propositions (Highest priority, conflict-governed, temporally grounded)
     for p_idx, prop in enumerate(propositions):
+        if is_raw_fragmented_tool_call(prop):
+            continue
         prop_id = f"prop_{request_id}_{p_idx}"
         enriched_prop = enrich_temporal_text(prop, prop_sec)
         records_to_insert.append((
@@ -231,6 +235,9 @@ def save_memories_batch(
         else:
             content_str = str(content_val)
 
+        if is_raw_fragmented_tool_call(content_str):
+            continue
+
         raw_id = f"raw_{request_id}_{m_idx}"
         msg_ts_int, msg_iso = normalize_timestamp_to_iso(msg.get("timestamp"))
         msg_sec = parse_timestamp_seconds(msg_ts_int)
@@ -241,6 +248,9 @@ def save_memories_batch(
         ))
         texts_for_embed.append(enriched_content)
         mem_ids_for_embed.append(raw_id)
+
+    if not records_to_insert:
+        return 0
 
     # Batch compute embeddings
     embeddings = get_embeddings(texts_for_embed)
@@ -260,6 +270,7 @@ def save_memories_batch(
                         INSERT OR REPLACE INTO embeddings (memory_id, vector)
                         VALUES (?, ?)
                     """, (mem_id, json.dumps(emb)))
+
 
     return len(records_to_insert)
 
@@ -435,8 +446,9 @@ def search_hybrid(
         '很多', '非常', '十分', '比较', '更加', '最先', '最后', '一直', '曾经', '已经',
         '正在', '将要', '出来', '进去', '起来', '下去', '过来', '过去', '那次', '这次',
         '下来', '上去', '我有', '你有', '没有', '有过', '是不', '有没', '那阵', '阵子',
-        '帮我', '我想', '想想', '直接'
+        '帮我', '我想', '想想', '直接', '先后', '顺序', '时间', '说明', '请按', '请问'
     }
+
     zh_q_bi = [
         b for b in zh_q_raw_bi
         if b not in ZH_GLUE_BIGRAMS and not (b[0] in ZH_STOP_CHARS and b[1] in ZH_STOP_CHARS)
@@ -641,10 +653,12 @@ def search_hybrid(
 
     CODE_KEYWORDS = {
         "patch", "git", "diff", "code", "function", "method", "class", "pytest", "test", "tests",
-        "traceback", "exception", "repo", "repository", "issue", "pull request", "pr",
+        "traceback", "exception", "repo", "repository", "issue", "pull", "pr",
         "astropy", "numpy", "cython", "table", "timeseries", "binnedtimeseries", "to_pandas",
-        "remove_indices", "fold", "typeerror", "fix", "bug"
+        "remove_indices", "fold", "typeerror", "valueerror", "fix", "bug",
+        "column", "columns", "invalid", "missing", "required", "fails", "error", "syntax"
     }
+
     has_code_file = bool(re.search(r"\b[a-zA-Z0-9_-]+\.(?:py|pyx|pxd|sh|js|ts|cpp|c|h|md)\b", query_lower))
     has_code_kw = bool(set(re.findall(r"\b[a-zA-Z0-9_]+\b", query_lower)) & CODE_KEYWORDS)
     has_code_underscore = bool(re.search(r"\b[a-zA-Z0-9]+_[a-zA-Z0-9_]+\b", query_lower))
@@ -865,14 +879,6 @@ def search_hybrid(
 
             has_diff = any(k in content for k in ["diff --git", "--- a/", "+++ b/", "@@ -", "```diff", "[Code Patch / Solution]"])
 
-            # Tool operation on target code file (e.g. [tool_use Read], [tool_use Write], [tool_use Edit])
-            tool_file_match = re.search(r'\[tool_use (?:Read|Write|Edit)\]\s*\{"file_path":\s*"([^"]+)"', content)
-            if tool_file_match:
-                tf = tool_file_match.group(1).lower()
-                tf_parts = set(re.split(r"[/._-]+", tf)) - GENERIC_CODE_TERMS
-                if (tf_parts & q_modules) or any(fm in tf for fm in q_file_mentions):
-                    base_score += 0.75
-
             # Specific File & Module Mention Alignment:
             if q_file_mentions or q_modules:
                 mentions_target_file = any(fm in content_lower for fm in q_file_mentions) if q_file_mentions else False
@@ -882,12 +888,10 @@ def search_hybrid(
                 if (q_file_mentions and q_modules and mentions_target_file and mentions_target_module) or \
                    (q_file_mentions and not q_modules and mentions_target_file) or \
                    (not q_file_mentions and q_modules and mentions_target_module):
-                    if tool_file_match:
-                        base_score += 1.10 * rel_factor
+                    if has_diff:
+                        base_score += 1.50 * rel_factor
                     elif item_type == "proposition":
                         base_score += 0.80 * rel_factor
-                    elif has_diff:
-                        base_score += 0.90 * rel_factor
                 elif q_file_mentions and q_modules and mentions_target_file and not mentions_target_module:
                     # Same filename from wrong module (e.g. timeseries/core.py when query explicitly asks for ascii/core.py)
                     base_score *= 0.25
@@ -936,7 +940,7 @@ def search_hybrid(
                     mismatched_diff = bool((q_modules or q_file_mentions) and diff_files and not file_matched and not symbol_matched)
 
                 if file_matched or (symbol_matched and not mismatched_diff):
-                    base_score += 0.50
+                    base_score += 1.50
                     if any(q in query_lower for q in ["patch", "fix", "solution", "diff", "code", "method", "function", "typeerror", "error", "bug"]):
                         base_score += 0.55
                 elif mismatched_diff:
@@ -944,13 +948,16 @@ def search_hybrid(
                     base_score *= 0.15
                 elif b_score < 0.05:
                     base_score *= 0.50
-        # Code noise penalty for boilerplate status/task updates, empty file notices, and uninformative thinking dumps
+                elif not (q_file_mentions or q_modules):
+                    base_score += 1.50
+        # Code noise penalty for boilerplate status/task updates, raw tool calls, and uninformative thinking dumps
         is_task_noise = any(k in content for k in [
             "[tool_use TaskUpdate]", "[tool_use TaskCreate]", "[tool_use TaskList]",
             "was created successfully on", "was updated to 'in_progress'", "was updated to 'completed'",
             "task state is current in your workspace", "file state is current in your context",
-            "(Bash completed with no output)"
-        ])
+            "(Bash completed with no output)",
+            "[tool_use Read]", "[tool_use Edit]", "[tool_use Bash]", "[tool_use Write]", "[tool_result]"
+        ]) and not has_diff
         is_pure_thinking = "[thinking]" in content and not any(k in content for k in ["[tool_use ", "diff --git", "[Code Patch / Solution]"])
         has_diff = any(k in content for k in ["diff --git", "--- a/", "+++ b/", "```diff", "[Code Patch / Solution]"])
 
@@ -966,7 +973,7 @@ def search_hybrid(
 
         noise_mult = 1.0
         if is_task_noise:
-            noise_mult = 0.10
+            noise_mult = 0.05 if is_code_q else 0.10
         elif "__init__.py" in content and "init" not in query_lower:
             noise_mult = 0.20
         elif bool(re.search(r"(_\s*){10,}", content)) or "============================= test session starts" in content:
@@ -975,6 +982,7 @@ def search_hybrid(
             noise_mult = 0.20
         elif is_pure_thinking and (q_code_substantive or q_file_mentions or q_modules):
             noise_mult = 0.40
+
         elif is_code_q and item_type == "raw" and not has_diff and len(content) > 2500:
             noise_mult = 0.25
 
@@ -1286,6 +1294,7 @@ def search_hybrid(
 
     # In-Domain Abstention Guard:
     # If options contain an explicit refusal choice ("Cannot infer" / "无法推断"),
+    # OR if candidates lack lexical/BM25 support,
     # OR if the query is a verification question ("有没有", "是不是", "是否", "能否", "更在意", "超预算", etc.)
     # verify that the top retrieved candidates actually provide evidence rather than merely matching background entities.
     is_wh_question = bool(re.match(r"^\s*(?:where|when|what|who|whom|which|why|how)\b", query_text, re.IGNORECASE))
@@ -1293,24 +1302,42 @@ def search_hybrid(
         r"(?:有没有|是不是|是否|能否|到底|更在意|最在意|哪一类|哪一天|哪一年|具体目标|单独记|超预算|\b(?:did|was|is|has|have|had|could|would)\s+(?:the\s+user|i|anyone|he|she)\b|\bwas\s+there\s+(?:any|ever)\b|\bis\s+there\s+(?:any\s+record|any\s+mention)\b)",
         re.IGNORECASE
     )
-    should_verify = has_abstain_choice or (not is_wh_question and bool(VERIFICATION_PATTERNS.search(query_text)))
+    has_bm25_support = any(bm25_scores.get(item["id"], 0.0) > 0.01 for item in expanded_items[:2])
+    should_verify = has_abstain_choice or (not has_bm25_support and not has_opt_match) or (not is_wh_question and bool(VERIFICATION_PATTERNS.search(query_text)))
     if expanded_items and should_verify and DASHSCOPE_API_KEY:
         cand_sample = "\n".join(f"- {item['content'][:450]}" for item in expanded_items[:6])
         if not verify_answerability_with_llm(query_text, cand_sample, clean_options):
             return make_unmentioned_notice(query_text)
 
     # 7. Hard Bounded Payload:
-    # A. Coding Scenario: filter out noise, preserve relevance score order, cap at min(top_k, 5) items & <= 16,000 bytes
-    is_coding = any(any(k in it["content"] for k in ["diff --git", "--- a/", "+++ b/", "@@ -", "[Code Patch / Solution]", "[tool_use Bash]", "[tool_use Edit]", "[tool_use Read]"]) for it in expanded_items)
+    # A. Coding Scenario: filter out noise, prioritize complete patches, cap at top 2 cleanest <= 2,500 bytes total
+    is_coding = is_code_q or any(any(k in it["content"] for k in ["diff --git", "--- a/", "+++ b/", "@@ -", "[Code Patch / Solution]", "[tool_use Bash]", "[tool_use Edit]", "[tool_use Read]"]) for it in expanded_items)
     if is_coding:
         coding_items = [
             it for it in expanded_items
-            if not any(k in it["content"] for k in ["[tool_use TaskUpdate]", "[tool_use TaskCreate]", "(Bash completed with no output)"])
+            if not any(k in it["content"] for k in [
+                "[tool_use TaskUpdate]", "[tool_use TaskCreate]", "[tool_use TaskList]",
+                "(Bash completed with no output)", "[tool_use Read]", "[tool_use Edit]",
+                "[tool_use Bash]", "[tool_use Write]", "[tool_result]"
+            ]) or any(k in it["content"] for k in ["diff --git", "--- a/", "+++ b/", "@@ -", "[Code Patch / Solution]"])
         ]
-        patch_items = [it for it in coding_items if any(k in it["content"] for k in ["diff --git", "[Code Patch / Solution]"])]
-        other_items = [it for it in coding_items if it not in patch_items]
-        # Keep items strictly in calibrated score order
-        coding_items.sort(key=lambda x: x.get("score", 0), reverse=True)
+        if not coding_items:
+            coding_items = [
+                it for it in expanded_items
+                if not any(k in it["content"] for k in ["[tool_use TaskUpdate]", "[tool_use TaskCreate]", "(Bash completed with no output)"])
+            ]
+        if not coding_items:
+            coding_items = expanded_items
+
+        # Prefer complete unified git diff patches and solutions
+        patch_items = [it for it in coding_items if any(k in it["content"] for k in ["diff --git", "--- a/", "+++ b/", "@@ -", "[Code Patch / Solution]", "```diff"])]
+        if patch_items:
+            patch_items.sort(key=lambda x: x.get("score", 0), reverse=True)
+            non_patch_items = [it for it in coding_items if it not in patch_items]
+            non_patch_items.sort(key=lambda x: x.get("score", 0), reverse=True)
+            coding_items = patch_items + non_patch_items
+        else:
+            coding_items.sort(key=lambda x: x.get("score", 0), reverse=True)
 
         # Atomic Session Bundling: If top candidate has a session_id, prioritize co-retrieving
         # related test and code patches from the same session/task within the budget.
@@ -1322,42 +1349,63 @@ def search_hybrid(
 
         final_items = []
         cum_bytes = 0
-        max_code_items = min(top_k, 5)
+        max_code_items = min(top_k, 2)
         for it in coding_items:
             it_copy = dict(it)
             c_text = it_copy["content"]
-            # Enforce individual and cumulative bounds so top items strictly fit within 8KB agent context
-            if cum_bytes + len(c_text.encode("utf-8")) > 6800 and len(final_items) >= 1:
-                allowed = max(300, 6800 - cum_bytes)
-                if len(c_text.encode("utf-8")) > allowed:
-                    c_text = c_text[:allowed] + "\n...[truncated for agent budget]"
-                    it_copy["content"] = c_text
-                    it_copy["text"] = c_text
-            elif len(c_text) > 2200:
-                c_text = c_text[:2200] + "\n...[truncated for length]"
+            rem_bytes = 2500 - cum_bytes
+            if rem_bytes <= 150 and len(final_items) >= 1:
+                break
+
+            c_bytes = len(c_text.encode("utf-8"))
+            if c_bytes > rem_bytes:
+                allowed = max(100, rem_bytes - 35)
+                c_text = c_text.encode("utf-8")[:allowed].decode("utf-8", errors="ignore") + "\n...[truncated for budget]"
                 it_copy["content"] = c_text
                 it_copy["text"] = c_text
 
             it_bytes = len(it_copy["content"].encode("utf-8"))
-            if cum_bytes + it_bytes > 7200 and len(final_items) >= 2:
+            if cum_bytes + it_bytes > 2500 and len(final_items) >= 1:
                 break
             final_items.append(it_copy)
             cum_bytes += it_bytes
             if len(final_items) >= max_code_items:
                 break
-        return final_items
+    else:
+        # B. Textual & Multimodal Scenario: cap at min(top_k, 10) items and <= 15,000 bytes
+        final_items = []
+        cum_bytes = 0
+        max_count = min(top_k, 10)
+        for it in expanded_items:
+            it_bytes = len(it["content"].encode("utf-8"))
+            if cum_bytes + it_bytes > 15000 and len(final_items) >= 2:
+                break
+            final_items.append(dict(it))
+            cum_bytes += it_bytes
+            if len(final_items) >= max_count:
+                break
 
-    # B. Textual & Multimodal Scenario: cap at min(top_k, 10) items and <= 15,000 bytes
-    final_items = []
-    cum_bytes = 0
-    max_count = min(top_k, 10)
-    for it in expanded_items:
-        it_bytes = len(it["content"].encode("utf-8"))
-        if cum_bytes + it_bytes > 15000 and len(final_items) >= 2:
-            break
-        final_items.append(it)
-        cum_bytes += it_bytes
-        if len(final_items) >= max_count:
-            break
+    # Temporal Sequence Sorting:
+    # For queries containing temporal sequence indicators, re-sort the top-k candidates
+    # chronologically (timestamp ASC) so the answering LLM receives the multi-session narrative in order.
+    TEMPORAL_SEQUENCE_INDICATORS = [
+        "先后", "顺序", "最初", "最终", "第一步", "第二步", "时间线", "按时间",
+        "chronological", "chronologically", "timeline", "in order", "sequence"
+    ]
+    is_temporal_sequence_q = (
+        any(k in query_lower for k in TEMPORAL_SEQUENCE_INDICATORS)
+        or bool(re.search(r"\bfirst\b[\s\S]*?\bthen\b", query_lower))
+        or bool(re.search(r"\bin (?:what |which )?(?:order|sequence)\b", query_lower))
+    )
+    if is_temporal_sequence_q and len(final_items) > 1:
+        final_items.sort(key=lambda x: (x.get("timestamp") is None, x.get("timestamp") or 0))
+
+    # Clean Output Presentation:
+    # Strip cumbersome bracketed temporal markers ([Conversation Date: ...], [Year: ...], [Month: ...], [Date: ...], [2024年...])
+    # from returned content and text, while strictly preserving created_at and timestamp metadata.
+    for it in final_items:
+        it["content"] = strip_temporal_markers(it.get("content", ""))
+        it["text"] = strip_temporal_markers(it.get("text", it["content"]))
 
     return final_items
+

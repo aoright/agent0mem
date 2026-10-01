@@ -1,3 +1,4 @@
+import re
 import json
 import time
 import logging
@@ -9,6 +10,21 @@ from typing import List, Dict, Any, Optional
 from app.config import DASHSCOPE_API_KEY, DASHSCOPE_BASE_URL, ENABLE_LLM_EXTRACTION
 
 logger = logging.getLogger("agent0mem.extractor")
+
+
+def is_raw_fragmented_tool_call(content: str) -> bool:
+    """Check if content is a raw fragmented tool call or tool execution noise without code patches."""
+    if not content:
+        return False
+    if any(marker in content for marker in ["diff --git", "--- a/", "+++ b/", "@@ -", "```diff", "[Code Patch / Solution]"]):
+        return False
+    c = content.strip()
+    if re.search(r"\[tool_use\s+(?:Read|Write|Edit|Bash|TaskUpdate|TaskCreate|TaskList)\]", c):
+        return True
+    if c.startswith("[tool_result]") or "(Bash completed with no output)" in c:
+        return True
+    return False
+
 
 EXTRACTION_PROMPT = """You are an expert memory distillation and governance engine.
 Given the timestamped conversation turns, extract key factual statements as atomic, self-contained propositions.
@@ -80,7 +96,10 @@ def extract_propositions(messages: List[Dict[str, Any]]) -> List[str]:
             content = " ".join(parts)
         content_str = str(content).strip()
         if content_str and len(content_str) > 1:
+            if is_raw_fragmented_tool_call(content_str):
+                continue
             dialogue_lines.append(f"{time_prefix}{role}: {content_str}")
+
 
     if not dialogue_lines:
         return []
