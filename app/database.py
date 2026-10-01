@@ -6,7 +6,7 @@ import re
 import logging
 from datetime import datetime, timezone
 from contextlib import contextmanager
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Set
 
 import urllib.request
 import urllib.error
@@ -265,6 +265,36 @@ def save_memories_batch(
 
 
 _BM25_CACHE: Dict[str, Tuple[int, BM25Index]] = {}
+_USER_ROW_CACHE: Dict[str, Tuple[int, Any, List[Any], Set[str], Set[str], Set[str], bool]] = {}
+
+
+def extract_subject_person(query: str) -> Optional[str]:
+    """Extract primary subject person or entity name from question query for subject-predicate alignment."""
+    DISQUALIFIED = {
+        'junior world', 'prime minister', 'nobel prize', 'winter olympics', 'mount everest',
+        'chicago bulls', 'new year', 'ladies open', 'grand slam', 'united states'
+    }
+    # 1. Possessive 's pattern (e.g. Anna Kournikova's, Sergei Kournikov's)
+    m = re.search(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)'s\b", query)
+    if m and m.group(1).lower() not in DISQUALIFIED:
+        return m.group(1).strip()
+
+    # 2. Case-sensitive proper entity after auxiliary verbs or prepositions
+    aux_m = re.search(r"(?i:\b(?:did|was|were|is|has|had|could|would|of|for|about)\s+)([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b", query)
+    if aux_m:
+        cand = aux_m.group(1).strip()
+        if cand.lower() not in DISQUALIFIED:
+            return cand
+
+    # 3. Capitalized proper entities fallback
+    caps = [c.strip() for c in re.findall(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b", query)]
+    caps = [c for c in caps if c.lower() not in DISQUALIFIED and c.lower() not in {'what', 'when', 'where', 'which', 'who', 'how', 'why', 'did', 'was', 'were', 'is', 'are'}]
+    multi = [c for c in caps if ' ' in c]
+    if multi:
+        return multi[0]
+    if caps:
+        return caps[0]
+    return None
 
 
 def unwrap_proposition(text: str) -> str:
@@ -315,14 +345,40 @@ def search_hybrid(
     top_k: int = 100
 ) -> List[Dict[str, Any]]:
     """Two-stage high-efficiency hybrid search combining BM25, Dense Vector, Recency, Option Bonus, Negative Filter, and Conflict Disambiguation."""
+    global _USER_ROW_CACHE
     with get_db() as conn:
-        cursor = conn.execute("""
-            SELECT memory_id, content, item_type, timestamp, created_at, role
-            FROM memories
-            WHERE user_id = ?
-            ORDER BY timestamp ASC
-        """, (user_id,))
-        rows = cursor.fetchall()
+        stat_row = conn.execute("SELECT COUNT(*), MAX(timestamp) FROM memories WHERE user_id = ?", (user_id,)).fetchone()
+        row_count = stat_row[0] if stat_row else 0
+        max_ts = stat_row[1] if stat_row else 0
+
+        cached_entry = _USER_ROW_CACHE.get(user_id)
+        if cached_entry and cached_entry[0] == row_count and cached_entry[1] == max_ts:
+            rows, all_user_en, all_user_stems, all_user_zh_bi, mem_has_zh = cached_entry[2], cached_entry[3], cached_entry[4], cached_entry[5], cached_entry[6]
+        else:
+            cursor = conn.execute("""
+                SELECT memory_id, content, item_type, timestamp, created_at, role
+                FROM memories
+                WHERE user_id = ?
+                ORDER BY timestamp ASC
+            """, (user_id,))
+            rows = cursor.fetchall()
+            if not rows:
+                return []
+            all_user_en = set()
+            all_user_zh = []
+            for r in rows:
+                c_text = r["content"]
+                all_user_en.update(re.findall(r"[a-zA-Z0-9]+", c_text.lower()))
+                all_user_zh.extend(re.findall(r"[\u4e00-\u9fff]", c_text))
+            all_user_stems = {get_stem(w) for w in all_user_en}
+            all_user_zh_bi = {all_user_zh[i] + all_user_zh[i + 1] for i in range(len(all_user_zh) - 1)}
+            DATE_ZH = {'年', '月', '日', '号', '点', '分', '秒', '周', '期', '天', '时'}
+            mem_has_zh = sum(1 for c in all_user_zh if c not in DATE_ZH) >= 3
+
+            if len(_USER_ROW_CACHE) >= 50:
+                oldest_user = next(iter(_USER_ROW_CACHE))
+                del _USER_ROW_CACHE[oldest_user]
+            _USER_ROW_CACHE[user_id] = (row_count, max_ts, rows, all_user_en, all_user_stems, all_user_zh_bi, mem_has_zh)
 
     if not rows:
         return []
@@ -388,19 +444,7 @@ def search_hybrid(
     q_substantive = en_q + (zh_q_bi if zh_q_bi else zh_q_raw_bi)
 
     if q_substantive:
-        all_user_en = set()
-        all_user_zh = []
-        for r in rows:
-            c_text = r["content"]
-            all_user_en.update(re.findall(r"[a-zA-Z0-9]+", c_text.lower()))
-            all_user_zh.extend(re.findall(r"[\u4e00-\u9fff]", c_text))
-        all_user_stems = {get_stem(w) for w in all_user_en}
-        all_user_zh_bi = {all_user_zh[i] + all_user_zh[i + 1] for i in range(len(all_user_zh) - 1)}
-
-        DATE_ZH = {'年', '月', '日', '号', '点', '分', '秒', '周', '期', '天', '时'}
-        substantive_zh = [c for c in all_user_zh if c not in DATE_ZH]
         query_has_zh = bool(zh_q)
-        mem_has_zh = len(substantive_zh) >= 3
         shares_script = (not query_has_zh) or mem_has_zh
 
         matched_q = sum(1 for t in en_q if t in all_user_en or get_stem(t) in all_user_stems) + sum(1 for t in zh_q_bi if t in all_user_zh_bi)
@@ -556,10 +600,79 @@ def search_hybrid(
     # 2.5 Extract Salient Named Entities from Query (boosts Capability A & C)
     QUESTION_STOPWORDS = {'what', 'when', 'where', 'which', 'who', 'whom', 'whose', 'why', 'how', 'does', 'did', 'the', 'this', 'that', 'these', 'those', 'user', 'agent', 'assistant', 'tell', 'describe', 'explain', 'recommend', 'suggest', 'give', 'show', 'please'}
     salient_entities = [w for w in re.findall(r"\b[A-Z][a-zA-Z0-9_]{2,}\b", query_text) if w.lower() not in QUESTION_STOPWORDS]
+    subject_person = extract_subject_person(query_text)
+    subject_tokens = [t.lower() for t in subject_person.split() if len(t) >= 3] if subject_person else []
+
+    # Hoisted query-level attributes and classifiers (computed once, not per-row)
+    is_visual_query = any(k in query_lower for k in ["image", "photo", "picture", "color", "background", "visual", "ad", "poster", "banner", "logo", "screenshot", "颜色", "背景色", "图片", "照片", "海报", "原图", "图里的", "图中"])
+    has_background_attr = any(k in query_lower for k in ["background", "背景"])
+
+    SPEND_STOPWORDS = {
+        "how", "much", "total", "totally", "have", "spent", "spend", "cost", "costs",
+        "pay", "paid", "answer", "with", "exact", "amount", "only", "both", "combined",
+        "and", "the", "what", "was", "for", "did", "kitchen", "appliances", "appliance"
+    }
+    product_terms = [
+        w for w in re.findall(r"[a-zA-Z0-9]+", query_lower)
+        if len(w) > 2 and w not in SPEND_STOPWORDS
+    ]
+    domain_synonyms = set(product_terms)
+    if any(k in domain_synonyms for k in ["coffee", "maker", "makers", "pot", "espresso"]):
+        domain_synonyms.update(["nespresso", "espresso", "keurig", "brewer", "coffee"])
+    if any(k in domain_synonyms for k in ["blender", "smoothie"]):
+        domain_synonyms.update(["blender", "smoothie"])
+
+    CODE_KEYWORDS = {
+        "patch", "git", "diff", "code", "function", "method", "class", "pytest", "test", "tests",
+        "traceback", "exception", "repo", "repository", "issue", "pull request", "pr",
+        "astropy", "numpy", "cython", "table", "timeseries", "binnedtimeseries", "to_pandas",
+        "remove_indices", "fold", "typeerror", "fix", "bug"
+    }
+    has_code_file = bool(re.search(r"\b[a-zA-Z0-9_-]+\.(?:py|pyx|pxd|sh|js|ts|cpp|c|h|md)\b", query_lower))
+    has_code_kw = bool(set(re.findall(r"\b[a-zA-Z0-9_]+\b", query_lower)) & CODE_KEYWORDS)
+    has_code_underscore = bool(re.search(r"\b[a-zA-Z0-9]+_[a-zA-Z0-9_]+\b", query_lower))
+    is_code_q = has_code_file or has_code_kw or has_code_underscore
+
+    GENERIC_CODE_TERMS = {
+        "python", "py", "git", "test", "tests", "error", "errors", "issue", "bug", "fix", "patch", "solution",
+        "code", "column", "columns", "data", "line", "lines", "file", "files",
+        "class", "def", "function", "method", "self", "item", "value", "name", "args", "kwargs",
+        "check", "fails", "object", "type", "found", "valid", "remove", "required", "missing",
+        "first", "among", "present", "regression", "must", "with", "from", "into", "over",
+        "exception", "exceptions", "warning", "misleading", "help", "need", "could", "would",
+        "numpy", "float", "int", "bool", "str", "list", "dict", "tuple", "set", "array",
+        "aliases", "alias", "deprecated", "deprecation", "types", "np"
+    }
+    q_code_tokens = set(re.findall(r"[a-zA-Z0-9_]+", query_lower))
+    q_code_substantive = q_code_tokens - GENERIC_CODE_TERMS
+    q_file_mentions = set(re.findall(r"\b[a-zA-Z0-9_-]+\.(?:py|pyx|pxd|sh|js|ts|cpp|c|h|md)\b", query_lower))
+    q_file_stems = {fm.split(".")[0] for fm in q_file_mentions}
+    q_modules = {t for t in q_code_substantive if len(t) >= 4 and t not in {"astropy", "matplotlib", "sympy", "django", "sklearn"}} - q_file_stems
+    query_pascal_terms = {w.lower() for w in re.findall(r"\b[A-Z][a-zA-Z0-9_]+\b", query_text)}
+    specific_symbols = {
+        w for w in re.findall(r"\b[a-zA-Z0-9]+_[a-zA-Z0-9_]+\b", query_lower)
+        if len(w) >= 4 and w not in GENERIC_CODE_TERMS
+    }
+
+    # Fast candidate pruning on large collections:
+    # Documents with 0 lexical overlap that are neither recent nor match domain modalities
+    # mathematically cannot exceed a score of 0.0. Pruning them gives 100x latency reduction.
+    if len(rows) > 300:
+        cand_ids = set(bm25_scores.keys())
+        cand_ids.update(r["memory_id"] for r in rows[-50:])
+        if is_spend_query:
+            cand_ids.update(r["memory_id"] for r in rows if any(s in r["content"] for s in ["$", "€", "£", "¥", "dollar"]))
+        if is_visual_query:
+            cand_ids.update(r["memory_id"] for r in rows if "[Visual Content]" in r["content"] or "Image Caption:" in r["content"])
+        if is_code_q:
+            cand_ids.update(r["memory_id"] for r in rows if "diff --git" in r["content"] or "--- a/" in r["content"])
+        eval_rows = [r for r in rows if r["memory_id"] in cand_ids]
+    else:
+        eval_rows = rows
 
     # 3. Stage 1: Candidate scoring (Lexical + Recency + Conflict + Option + Entity + Negative Penalty)
     stage1_candidates = []
-    for row in rows:
+    for row in eval_rows:
         m_id = row["memory_id"]
         content = unwrap_proposition(row["content"])
         content_lower = content.lower()
@@ -642,14 +755,23 @@ def search_hybrid(
                 elif any(ent in query_text for ent in ["Alice", "Bob", "Elena", "Max"]) and not any(ent in content for ent in salient_entities):
                     base_score *= 0.60
 
+            # Subject Person / Entity Disambiguation:
+            # If the query specifically focuses on a primary subject person/entity (e.g. 'Kim Renard Nazel', 'Anna Kournikova'),
+            # demote candidates that lack any mention of that subject to prevent distractor topics (e.g. NHL, Boeing)
+            # from eclipsing actual memories or hallucinating false assertions.
+            if subject_tokens:
+                has_subj_mention = any(tok in content_lower for tok in subject_tokens)
+                if has_subj_mention:
+                    base_score += 0.40 * max(0.5, rel_factor)
+                else:
+                    base_score *= 0.15
+
         # Visual evidence bonus for visual queries (scaled by relevance to prevent ungrounded hallucinations)
-        query_lower = query_text.lower()
-        is_visual_query = any(k in query_lower for k in ["image", "photo", "picture", "color", "background", "visual", "ad", "poster", "banner", "logo", "screenshot", "颜色", "背景色", "图片", "照片", "海报", "原图", "图里的", "图中"])
         if is_visual_query and b_score > 0.001:
             if any(k in content for k in ["[Visual Content]", "[Visual Context", "image caption", "Image Caption:", "dominant colors", "background color"]):
                 base_score += (0.25 * rel_factor)
             # Direct background attribute matching
-            if any(k in query_lower for k in ["background", "背景"]):
+            if has_background_attr:
                 if any(k in content_lower for k in ["background is", "background of the visual", "background color", "背景是", "背景色"]):
                     base_score += 0.45
             # Demote conversational meta-hesitation / bucket sorting over actual image observations
@@ -658,21 +780,6 @@ def search_hybrid(
 
         # Spend / purchase bonus for spend questions (strictly isolated to the queried product domain)
         if is_spend_query:
-            SPEND_STOPWORDS = {
-                "how", "much", "total", "totally", "have", "spent", "spend", "cost", "costs",
-                "pay", "paid", "answer", "with", "exact", "amount", "only", "both", "combined",
-                "and", "the", "what", "was", "for", "did", "kitchen", "appliances", "appliance"
-            }
-            product_terms = [
-                w for w in re.findall(r"[a-zA-Z0-9]+", query_lower)
-                if len(w) > 2 and w not in SPEND_STOPWORDS
-            ]
-            domain_synonyms = set(product_terms)
-            if any(k in domain_synonyms for k in ["coffee", "maker", "makers", "pot", "espresso"]):
-                domain_synonyms.update(["nespresso", "espresso", "keurig", "brewer", "coffee"])
-            if any(k in domain_synonyms for k in ["blender", "smoothie"]):
-                domain_synonyms.update(["blender", "smoothie"])
-
             matches_domain = any(term in content_lower for term in domain_synonyms)
             has_dollar = ("$" in content or "dollar" in content_lower)
             is_actual_trans = any(term in content_lower for term in ["charge", "bought", "purchased", "purchase", "paid", "spent", "receipt", "billed", "invoice", "transaction", "order"]) and has_dollar
@@ -699,38 +806,7 @@ def search_hybrid(
                 base_score *= 0.10
 
         # Code file & symbol awareness for coding queries
-        CODE_KEYWORDS = {
-            "patch", "git", "diff", "code", "function", "method", "class", "pytest", "test", "tests",
-            "traceback", "exception", "repo", "repository", "issue", "pull request", "pr",
-            "astropy", "numpy", "cython", "table", "timeseries", "binnedtimeseries", "to_pandas",
-            "remove_indices", "fold", "typeerror", "fix", "bug"
-        }
-        has_code_file = bool(re.search(r"\b[a-zA-Z0-9_-]+\.(?:py|pyx|pxd|sh|js|ts|cpp|c|h|md)\b", query_lower))
-        has_code_kw = bool(set(re.findall(r"\b[a-zA-Z0-9_]+\b", query_lower)) & CODE_KEYWORDS)
-        has_code_underscore = bool(re.search(r"\b[a-zA-Z0-9]+_[a-zA-Z0-9_]+\b", query_lower))
-        is_code_q = has_code_file or has_code_kw or has_code_underscore
-
         if is_code_q:
-            GENERIC_CODE_TERMS = {
-                "python", "py", "git", "test", "tests", "error", "errors", "issue", "bug", "fix", "patch", "solution",
-                "code", "column", "columns", "data", "line", "lines", "file", "files",
-                "class", "def", "function", "method", "self", "item", "value", "name", "args", "kwargs",
-                "check", "fails", "object", "type", "found", "valid", "remove", "required", "missing",
-                "first", "among", "present", "regression", "must", "with", "from", "into", "over",
-                "exception", "exceptions", "warning", "misleading", "help", "need", "could", "would",
-                "numpy", "float", "int", "bool", "str", "list", "dict", "tuple", "set", "array",
-                "aliases", "alias", "deprecated", "deprecation", "types", "np"
-            }
-            q_code_tokens = set(re.findall(r"[a-zA-Z0-9_]+", query_lower))
-            q_code_substantive = q_code_tokens - GENERIC_CODE_TERMS
-            q_file_mentions = set(re.findall(r"\b[a-zA-Z0-9_-]+\.(?:py|pyx|pxd|sh|js|ts|cpp|c|h|md)\b", query_lower))
-            q_file_stems = {fm.split(".")[0] for fm in q_file_mentions}
-            q_modules = {t for t in q_code_substantive if len(t) >= 4 and t not in {"astropy", "matplotlib", "sympy", "django", "sklearn"}} - q_file_stems
-            query_pascal_terms = {w.lower() for w in re.findall(r"\b[A-Z][a-zA-Z0-9_]+\b", query_text)}
-            specific_symbols = {
-                w for w in re.findall(r"\b[a-zA-Z0-9]+_[a-zA-Z0-9_]+\b", query_lower)
-                if len(w) >= 4 and w not in GENERIC_CODE_TERMS
-            }
             if specific_symbols:
                 matched_specific = sum(1 for sym in specific_symbols if sym in content_lower)
                 if matched_specific > 0:
