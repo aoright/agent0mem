@@ -378,7 +378,18 @@ def search_hybrid(
             any(syn in r["content"].lower() for syn in ["nespresso", "espresso", "coffee", "blender", "fryer", "router", "tablet", "ipad"]) and ("$" in r["content"] or "dollar" in r["content"].lower())
             for r in rows
         )
-        if shares_script and not has_spend_match and len(q_substantive) >= 4 and (matched_q / float(len(q_substantive))) < 0.32:
+        # Check if substantive candidate options match memory
+        ABSTAIN_KEYWORDS = [
+            "无法", "未提及", "没有提到", "未说明", "未记录", "不确定", "都不对", "以上都不", "无法推断", "不能推断", "无法判断",
+            "cannot infer", "cannot be determined", "not mentioned", "none of the above",
+            "not enough information", "insufficient information", "cannot be inferred"
+        ]
+        has_opt_match = bool(clean_options and any(
+            any(opt in r["content"].lower() for opt in clean_options if not any(kw in opt for kw in ABSTAIN_KEYWORDS))
+            for r in rows
+        ))
+
+        if shares_script and not has_spend_match and not has_opt_match and len(q_substantive) >= 4 and (matched_q / float(len(q_substantive))) < 0.32:
             if is_spend_query:
                 clean_q = query_text.strip().split("\n")[0]
                 return [{
@@ -401,11 +412,6 @@ def search_hybrid(
         # Option-based Deterministic Abstention Guard:
         # If downstream MCQ provides an abstention option (e.g. "Cannot infer", "None of the above", "无法推断"),
         # and NONE of the substantive choice options appear in memory, abstain immediately.
-        ABSTAIN_KEYWORDS = [
-            "无法", "未提及", "没有提到", "未说明", "未记录", "不确定", "都不对", "以上都不", "无法推断", "不能推断", "无法判断",
-            "cannot infer", "cannot be determined", "not mentioned", "none of the above",
-            "not enough information", "insufficient information", "cannot be inferred"
-        ]
         has_abstain_choice = clean_options and any(any(kw in opt for kw in ABSTAIN_KEYWORDS) for opt in clean_options)
         if has_abstain_choice:
             substantive_opts = [opt for opt in clean_options if not any(kw in opt for kw in ABSTAIN_KEYWORDS)]
@@ -428,7 +434,7 @@ def search_hybrid(
         zh_predicates = [b for b in zh_q_bi if b not in entity_zh_bi and not any(stop in b for stop in ZH_Q_STOP)]
         
         total_predicates = len(en_predicates) + len(zh_predicates)
-        if shares_script and total_predicates >= 2:
+        if shares_script and not has_opt_match and total_predicates >= 2:
             matched_pred = sum(1 for t in en_predicates if t in all_user_en or get_stem(t) in all_user_stems) + \
                            sum(1 for t in zh_predicates if t in all_user_zh_bi)
             if matched_pred == 0:
