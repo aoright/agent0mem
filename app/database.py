@@ -677,8 +677,9 @@ def search_hybrid(
     q_modules = {t for t in q_code_substantive if len(t) >= 4 and t not in {"astropy", "matplotlib", "sympy", "django", "sklearn"}} - q_file_stems
     query_pascal_terms = {w.lower() for w in re.findall(r"\b[A-Z][a-zA-Z0-9_]+\b", query_text)}
     specific_symbols = {
-        w for w in re.findall(r"\b[a-zA-Z0-9]+_[a-zA-Z0-9_]+\b", query_lower)
-        if len(w) >= 4 and w not in GENERIC_CODE_TERMS
+        w.strip("`() ")
+        for w in re.findall(r"(?:^|\s|[`(])_?[a-zA-Z0-9]+_[a-zA-Z0-9_]+(?:\b|[`\)])", query_lower)
+        if len(w.strip("`() ")) >= 4 and w.strip("`() ") not in GENERIC_CODE_TERMS
     }
     target_methods = {
         (f[0] or f[1]).lower()
@@ -870,9 +871,11 @@ def search_hybrid(
             if specific_symbols:
                 matched_specific = sum(1 for sym in specific_symbols if sym in content_lower)
                 if matched_specific > 0:
-                    base_score += 0.40 * matched_specific
-                if item_type == "proposition" and matched_specific < len(specific_symbols):
-                    base_score -= (0.28 * rel_factor)
+                    base_score += 0.80 * matched_specific
+                if item_type == "proposition" and not any(k in content for k in ["diff --git", "--- a/", "+++ b/", "@@ -", "[Code Patch / Solution]"]):
+                    base_score -= (0.40 * rel_factor)
+            elif item_type == "proposition" and not any(k in content for k in ["diff --git", "--- a/", "+++ b/", "@@ -", "[Code Patch / Solution]"]):
+                base_score *= 0.40
 
             has_diff = any(k in content for k in ["diff --git", "--- a/", "+++ b/", "@@ -", "```diff", "[Code Patch / Solution]"])
 
@@ -897,12 +900,12 @@ def search_hybrid(
                     base_score *= 0.35
 
                 # Cross-module isolation: if query targets module A and not module B, demote files modifying module B
-                ASTROPY_SUBMODULES = ["timeseries", "table", "ascii", "console"]
+                ASTROPY_SUBMODULES = ["timeseries", "table", "ascii", "console", "utils"]
                 for target_mod in ASTROPY_SUBMODULES:
-                    if target_mod in q_modules:
+                    if target_mod in q_modules or (target_mod == "timeseries" and "timeseries" in query_lower):
                         for other_mod in ASTROPY_SUBMODULES:
-                            if other_mod != target_mod and other_mod not in q_modules:
-                                if f"astropy/{other_mod}/" in content_lower or f"astropy.{other_mod}" in content_lower:
+                            if other_mod != target_mod and other_mod not in q_modules and other_mod not in query_lower:
+                                if f"astropy/{other_mod}/" in content_lower or f"astropy.{other_mod}" in content_lower or f"astropy/utils/{other_mod}.py" in content_lower or f"{other_mod}.py" in content_lower:
                                     mismatched_module = True
                                     base_score *= 0.15
 
@@ -1053,10 +1056,14 @@ def search_hybrid(
                 # Subtract baseline background noise floor (unrelated sentences hover around 0.35-0.48)
                 # Question-answer semantic alignment with hypernyms/synonyms exceeds 0.50
                 calibrated_sim = max(0.0, (raw_sim - 0.50) / 0.50)
-                # In coding queries, dense vector similarity must not elevate candidates with zero symbol or file match
+                # In coding queries, dense vector similarity must not elevate candidates with zero symbol or file match,
+                # nor should generic natural language propositions bury real code implementations
                 b_score_c = bm25_scores.get(c["id"], 0.0)
-                if is_code_q and b_score_c < 0.05 and not (specific_symbols and any(sym in c["content"].lower() for sym in specific_symbols)):
-                    calibrated_sim *= 0.15
+                if is_code_q:
+                    if c.get("item_type") == "proposition" and not any(k in c["content"] for k in ["diff --git", "--- a/", "+++ b/", "@@ -", "```diff", "[Code Patch / Solution]"]):
+                        calibrated_sim *= 0.15
+                    elif b_score_c < 0.05 and not (specific_symbols and any(sym in c["content"].lower() for sym in specific_symbols)):
+                        calibrated_sim *= 0.15
                 c["score"] += (DENSE_WEIGHT * calibrated_sim * c.get("noise_mult", 1.0))
             c["score"] = round(float(c["score"]), 4)
 
