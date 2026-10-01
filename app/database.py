@@ -875,10 +875,13 @@ def search_hybrid(
                 matched_specific = sum(1 for sym in specific_symbols if sym in content_lower)
                 if matched_specific > 0:
                     base_score += 0.80 * matched_specific
-                if item_type == "proposition" and not any(k in content for k in ["diff --git", "--- a/", "+++ b/", "@@ -", "[Code Patch / Solution]"]):
+                if item_type == "proposition" and not any(k in content for k in [".py", "diff --git", "--- a/", "+++ b/", "@@ -", "[Code Patch / Solution]"]):
                     base_score -= (0.40 * rel_factor)
-            elif item_type == "proposition" and not any(k in content for k in ["diff --git", "--- a/", "+++ b/", "@@ -", "[Code Patch / Solution]"]):
+            elif item_type == "proposition" and not any(k in content for k in [".py", "diff --git", "--- a/", "+++ b/", "@@ -", "[Code Patch / Solution]"]):
                 base_score *= 0.40
+
+            if any(ext in content_lower for ext in [".py", ".pyx", ".c", ".h", ".cpp"]):
+                base_score += 0.35
 
             has_diff = any(k in content for k in ["diff --git", "--- a/", "+++ b/", "@@ -", "```diff", "[Code Patch / Solution]"])
 
@@ -1379,11 +1382,11 @@ def search_hybrid(
 
         final_items = []
         cum_bytes = 0
-        max_code_items = min(top_k, 2)
+        max_code_items = min(top_k, 3)
         for it in coding_items:
             it_copy = dict(it)
             c_text = it_copy["content"]
-            rem_bytes = 2500 - cum_bytes
+            rem_bytes = 3800 - cum_bytes
             if rem_bytes <= 150 and len(final_items) >= 1:
                 break
 
@@ -1395,7 +1398,7 @@ def search_hybrid(
                 it_copy["text"] = c_text
 
             it_bytes = len(it_copy["content"].encode("utf-8"))
-            if cum_bytes + it_bytes > 2500 and len(final_items) >= 1:
+            if cum_bytes + it_bytes > 3800 and len(final_items) >= 1:
                 break
             final_items.append(it_copy)
             cum_bytes += it_bytes
