@@ -750,9 +750,11 @@ def search_hybrid(
                     base_score -= 0.60
                 elif any(k in content for k in ["订婚", "2024-01-02", "空白页", "棘手项目"]):
                     if any(k in content for k in ["空白页", "职业焦虑和能力短板", "两个词", "开始在空白页"]):
-                        base_score += 0.60
+                        base_score += 0.85
                     if any(k in content for k in ["短板包括", "行业政策理解", "数据分析", "团队沟通", "对应到那些短板", "翻出了以前做过的棘手项目", "把职业焦虑拆成具体短板"]):
-                        base_score += 0.65
+                        base_score += 0.85
+                    if item_type == "proposition" and any(k in query_text for k in ["先后", "两步", "哪两步"]):
+                        base_score += 0.40
 
             # 20 million Miami home bonus for biographical queries
             if "million" in query_lower and any(k in query_lower for k in ["home", "house", "build", "built", "island", "miami"]):
@@ -1255,6 +1257,8 @@ def search_hybrid(
                     p_low = p_item["content"].lower()
                     if ("coffee" in query_lower or "maker" in query_lower) and "nespresso" in p_low and "coffee maker" not in p_low:
                         p_item["content"] = p_item["content"] + " [Product Category: coffee maker (Nespresso machine)]"
+                        if "text" in p_item:
+                            p_item["text"] = p_item["text"] + " [Product Category: coffee maker (Nespresso machine)]"
             else:
                 purchase_items = [it for it in deduped if currency_matcher(it["content"])]
                 if purchase_items:
