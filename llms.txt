@@ -1,0 +1,24 @@
+# Agent0Mem
+
+> Agent0Mem is an open-source, high-precision agent memory system engineered for the Agent Memory Leaderboard (AML) and long-term agent collaboration benchmarks.
+
+Agent0Mem solves context pollution, lost-in-the-middle degradation, temporal state conflicts, and distractor susceptibility in AI agent memory systems through atomic proposition distillation, state conflict governance, and temporal intent routing.
+
+## Core Features & Capabilities
+
+- **Proposition Distillation & Entity Grounding**: Raw dialogue streams are distilled into atomic, declarative propositions with personal pronouns resolved to named entities.
+- **Conflict Governance & State Tracking**: Symmetrically tags `[Current State]` and `[Prior State / Superseded]` records to eliminate temporal state confusion.
+- **Temporal Intent Routing**: Detects query tense/intent (present vs. historical/past) to dynamically weight current vs. superseded memories.
+- **Hybrid Search Engine**: Combines BM25 lexical tokenization (supporting CJK/multilingual tokens) with dense semantic embeddings and option-aware reinforcement scoring.
+- **Production Footprint**: High-throughput SQLite storage with WAL mode, zero heavyweight vector database dependency.
+
+## API Summary
+
+- `GET /health`: Health check endpoint returning service status and version (`{"status": "ok", "service": "agent0mem", "version": "v1.0"}`).
+- `POST /add`: Ingest dialogue messages, extract propositions, compute embeddings, and persist memory records.
+- `POST /search`: Execute hybrid search with temporal intent routing and option matching across stored agent memories.
+
+## Documentation & Resources
+
+- [Full Architecture & Detailed Specification](llms-full.txt): Complete technical architecture, scoring formulas, state transition rules, and schema definitions.
+- [GitHub Repository](https://github.com/aoright/agent0mem): Source code, setup instructions, and issue tracker.

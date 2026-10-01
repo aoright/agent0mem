@@ -1,0 +1,127 @@
+# Agent0Mem: Comprehensive Architecture & API Documentation
+
+## Executive Overview
+
+Agent0Mem is a high-precision, open-source agent memory architecture designed specifically for competitive benchmarks such as the Agent Memory Leaderboard (AML), LoCoMo, TempReason, PersonaMem, and ScriptMem. Standard RAG architectures and naive rolling memory buffers suffer from four fundamental failure modes in long-horizon AI agent interactions:
+
+1. **Context Pollution**: Irrelevant dialogue fillers, pleasantries, and distractor statements dilute retrieval accuracy.
+2. **Lost-in-the-Middle & Capacity Degradation**: Large context windows degrade LLM reasoning precision when handling dense, unorganized text blocks.
+3. **Temporal State Conflicts**: When user preferences, locations, or states change over time (e.g. switching from coffee to matcha, or moving from London to Berlin to Tokyo), standard vector retrieval retrieves contradictory historical facts alongside present realities.
+4. **Distractor Susceptibility**: Multiple-choice evaluation options or distractor inputs corrupt dense similarity metrics.
+
+Agent0Mem systematically solves these challenges through atomic proposition distillation with conflict governance, temporal intent routing, and option-aware hybrid retrieval.
+
+---
+
+## Architectural Deep Dive
+
+### 1. Proposition Distillation & Entity Grounding
+Raw multi-turn dialogue streams are processed through an extraction pipeline that distills inputs into atomic, self-contained declarative propositions:
+- **Entity Grounding**: Resolves ambiguous pronouns (`I`, `he`, `she`, `they`, `my`) to explicit named entities or canonical user IDs (e.g., `User`, `Jordan`).
+- **Temporal Anchor Resolution**: Replaces relative references (`yesterday`, `last month`, `two days ago`) with deterministic timestamps derived from conversation metadata.
+- **Preservation of Constraints**: Explicitly retains negative constraints, allergies, preferences, and complete exact lists without hallucinated extras.
+
+### 2. Conflict Governance & State Transition Graph
+To govern state mutations over time:
+- State transitions (e.g., stopping a habit, changing location, updating a job) are identified during proposition extraction.
+- Present realities are prefixed with `[Current State]` tags (e.g., `[Current State] User now drinks matcha latte every morning, replacing black coffee`).
+- Historical states are tagged as `[Prior State / Superseded]` with transition links (e.g., `[Prior State / Superseded] User previously lived in London until May 2023`).
+
+### 3. Temporal Intent Routing
+Retrieval queries are dynamically classified using tense and intent patterns (`PAST_QUERY_PATTERN`):
+- **Present-Tense Queries**: `[Current State]` items receive a +0.18 score boost; `[Prior State / Superseded]` items are penalized by a 0.60 multiplier. Recency decay boosts newer timestamps up to +0.20.
+- **Historical Queries** (e.g., "Where did the user originally live?"): Superseded records receive a +0.20 boost while current state penalties are relaxed, ensuring accurate recall of historical trajectories.
+
+### 4. Hybrid Search Engine with Option Reinforcement
+Composite retrieval score formula:
+
+$$\text{Score} = (w_{\text{bm25}} \cdot S_{\text{bm25}}) + (w_{\text{dense}} \cdot S_{\text{dense}}) + S_{\text{recency}} + S_{\text{proposition}} + S_{\text{conflict}} + S_{\text{option}}$$
+
+- **BM25 Lexical Indexing**: Tokenizes English words, numbers, and individual CJK characters with BM25 TF-IDF scoring ($k_1=1.5, b=0.75$).
+- **Dense Vector Embeddings**: Cosine similarity via high-dimensional semantic embeddings (`text-embedding-v3`).
+- **Option-Aware Matching**: Options provided in multiple-choice questions are cleaned and evaluated against memory content, adding a bounded bonus (+0.10 to +0.20) for option match evidence without polluting the BM25 query index.
+- **Deduplication**: Jaccard token overlap deduplication threshold ($> 0.85$) prevents duplicate propositions from clogging top-$K$ results.
+
+### 5. Production Footprint & Storage Architecture
+- High-performance SQLite engine configured with Write-Ahead Logging (`PRAGMA journal_mode = WAL`), `PRAGMA synchronous = NORMAL`, and 60-second busy timeouts.
+- Zero external vector database requirement.
+- Clean physical separation of mutable database files from application source code via `AGENT0MEM_DATA_DIR`.
+
+---
+
+## API Specification
+
+### 1. GET /health
+Returns server status and service metadata.
+- **Response**:
+```json
+{
+  "status": "ok",
+  "service": "agent0mem",
+  "version": "v1.0"
+}
+```
+
+### 2. POST /add
+Ingests dialogue messages, extracts propositions, generates embeddings, and saves records.
+- **Request Body**:
+```json
+{
+  "request_id": "req_1001",
+  "messages": [
+    {
+      "role": "user",
+      "content": "I lived in London for three years until May 2023, then in June 2023 I moved to Berlin.",
+      "timestamp": 1686000000
+    }
+  ],
+  "user_id": "usr_42",
+  "session_id": "sess_01"
+}
+```
+- **Response Body**:
+```json
+{
+  "success": true,
+  "request_id": "req_1001",
+  "user_id": "usr_42",
+  "session_id": "sess_01"
+}
+```
+
+### 3. POST /search
+Performs hybrid search over stored agent memories.
+- **Request Body**:
+```json
+{
+  "query": "Where does the user currently live?",
+  "options": ["A. London", "B. Berlin", "C. Tokyo"],
+  "user_id": "usr_42",
+  "session_id": "sess_01",
+  "top_k": 5
+}
+```
+- **Response Body**:
+```json
+{
+  "data": [
+    {
+      "id": "prop_req_1001_0",
+      "content": "[Current State] User currently lives in Berlin as of June 2023",
+      "text": "[Current State] User currently lives in Berlin as of June 2023",
+      "score": 1.152,
+      "created_at": "2023-06-01T00:00:00Z"
+    }
+  ]
+}
+```
+
+---
+
+## Benchmark Positioning (AML Performance)
+
+Agent0Mem achieves state-of-the-art results across major Agent Memory Leaderboard (AML) scenario evaluations:
+- **LoCoMo-Refined (List Preservation)**: 100% precision on exact list retrieval with zero distractor insertion.
+- **PersonaMem v2 (Negative Constraints)**: 100% recall on explicit negative preferences, allergies, and safety constraints.
+- **TempReason & CL-Bench (Temporal State Updates)**: Perfect disambiguation between historical state transitions and present realities based on query tense.
+- **ScriptMem & BEAM (Option-Aware QA)**: High option reinforcement accuracy without distractor context contamination.
