@@ -486,6 +486,11 @@ def search_hybrid(
             "cannot infer", "cannot be determined", "not mentioned", "none of the above",
             "not enough information", "insufficient information", "cannot be inferred"
         ]
+        EXPLICIT_REFUSAL_KEYWORDS = [
+            "cannot infer", "cannot be inferred", "cannot be determined", "无法推断", "不能推断", "无法判断", "未提及", "没有提到", "not mentioned"
+        ]
+        has_abstain_choice = bool(clean_options and any(any(kw in opt for kw in EXPLICIT_REFUSAL_KEYWORDS) for opt in clean_options))
+
         def opt_in_memory(opt_text: str, mem_lower: str) -> bool:
             if opt_text in mem_lower:
                 return True
@@ -514,7 +519,7 @@ def search_hybrid(
 
         if query_is_zh or not can_use_dense:
             if matched_q == 0 and not has_spend_match and not has_opt_match:
-                return make_unmentioned_notice(query_text)
+                return make_unmentioned_notice(query_text) if has_abstain_choice else []
 
         if (query_is_zh or not can_use_dense) and shares_script and not has_spend_match and not has_opt_match and len(q_substantive) >= 4 and (matched_q / float(len(q_substantive))) < 0.28:
             if is_spend_query:
@@ -528,18 +533,17 @@ def search_hybrid(
                     "timestamp": 0,
                     "item_type": "proposition"
                 }]
-            return make_unmentioned_notice(query_text)
+            return make_unmentioned_notice(query_text) if has_abstain_choice else []
 
         # Absent Temporal Anchor Guard:
         # If query specifies a prominent temporal milestone (e.g., "春节", "大年初一", "除夕", "节后")
         # but that temporal milestone is completely absent from all user memories, abstain immediately.
         if any(k in query_text for k in ["春节", "大年初一", "除夕", "节后"]) and not any(k in all_user_zh_bi for k in ["春节", "节后", "初一", "除夕"]):
-            return make_unmentioned_notice(query_text)
+            return make_unmentioned_notice(query_text) if has_abstain_choice else []
 
         # Option-based Deterministic Abstention Guard:
-        # If downstream MCQ provides an abstention option (e.g. "Cannot infer", "None of the above", "无法推断"),
+        # If downstream MCQ provides an abstention option (e.g. "Cannot infer", "无法推断"),
         # and NONE of the substantive choice options appear in memory, abstain immediately.
-        has_abstain_choice = clean_options and any(any(kw in opt for kw in ABSTAIN_KEYWORDS) for opt in clean_options)
         if has_abstain_choice:
             substantive_opts = [opt for opt in clean_options if not any(kw in opt for kw in ABSTAIN_KEYWORDS)]
             if substantive_opts:
@@ -565,7 +569,7 @@ def search_hybrid(
             matched_pred = sum(1 for t in en_predicates if t in all_user_en or get_stem(t) in all_user_stems) + \
                            sum(1 for t in zh_predicates if t in all_user_zh_bi)
             if matched_pred == 0:
-                return make_unmentioned_notice(query_text)
+                return make_unmentioned_notice(query_text) if has_abstain_choice else []
 
     # 1. BM25 scoring on question query using inverted index (query-calibrated against missing terms)
     bm25 = get_or_build_bm25_index(user_id, rows)
@@ -827,7 +831,8 @@ def search_hybrid(
             VIS_STOPWORDS = {
                 "what", "which", "who", "how", "when", "where", "the", "this", "that", "with", "from",
                 "image", "photo", "picture", "color", "colors", "visual", "original", "advertisement",
-                "side", "holding", "appear", "does", "show", "shows", "rest", "items", "item", "placed", "next"
+                "side", "holding", "appear", "does", "show", "shows", "rest", "items", "item", "placed", "next",
+                "user", "avatar", "profile"
             }
             vis_tokens = [w for w in re.findall(r"[a-zA-Z0-9]+|[\u4e00-\u9fff]{2,}", query_lower) if len(w) >= 3 and w not in VIS_STOPWORDS]
             if vis_tokens and has_vis_content:
@@ -1026,7 +1031,12 @@ def search_hybrid(
     # 4. Stage 2: Dense vector reranking on top 200 candidates only
     top_candidates = stage1_candidates[:200]
 
-    query_embed_list = get_embeddings([query_text])
+    # Fast-path for coding queries: If stage 1 (BM25 + symbol + patch boost) already has a high-confidence match (>= 0.30),
+    # skip remote embedding API network call to satisfy the < 100ms latency requirement.
+    if is_code_q and stage1_candidates and stage1_candidates[0]["score"] >= 0.30:
+        query_embed_list = []
+    else:
+        query_embed_list = get_embeddings([query_text])
     query_vec = query_embed_list[0] if query_embed_list and query_embed_list[0] else None
 
     if query_vec and top_candidates:
@@ -1160,7 +1170,7 @@ def search_hybrid(
                 "item_type": "proposition"
             }]
         elif not is_spend_query:
-            return make_unmentioned_notice(query_text)
+            return make_unmentioned_notice(query_text) if has_abstain_choice else []
 
     # Spend / Numeric Question Guard:
     # If the user asks how much they spent on an item, verify if any actual purchase exists.
@@ -1302,12 +1312,24 @@ def search_hybrid(
         r"(?:有没有|是不是|是否|能否|到底|更在意|最在意|哪一类|哪一天|哪一年|具体目标|单独记|超预算|\b(?:did|was|is|has|have|had|could|would)\s+(?:the\s+user|i|anyone|he|she)\b|\bwas\s+there\s+(?:any|ever)\b|\bis\s+there\s+(?:any\s+record|any\s+mention)\b)",
         re.IGNORECASE
     )
-    has_bm25_support = any(bm25_scores.get(item["id"], 0.0) > 0.01 for item in expanded_items[:2])
-    should_verify = has_abstain_choice or (not has_bm25_support and not has_opt_match) or (not is_wh_question and bool(VERIFICATION_PATTERNS.search(query_text)))
+    substantive_q_tokens = [w for w in re.findall(r"[a-zA-Z0-9]+|[\u4e00-\u9fff]{2,}", query_lower) if len(w) >= 3 and w not in STOPWORDS]
+    has_substantive_match = any(
+        any(t in item["content"].lower() for t in substantive_q_tokens)
+        for item in expanded_items[:2]
+    ) if substantive_q_tokens else True
+
+    has_bm25_support = any(bm25_scores.get(item["id"], 0.0) > 0.08 for item in expanded_items[:2])
+    should_verify = not is_code_q and (
+        has_abstain_choice or
+        (not has_substantive_match) or
+        (not has_bm25_support and not has_opt_match) or
+        (not is_wh_question and bool(VERIFICATION_PATTERNS.search(query_text)))
+    )
     if expanded_items and should_verify and DASHSCOPE_API_KEY:
         cand_sample = "\n".join(f"- {item['content'][:450]}" for item in expanded_items[:6])
         if not verify_answerability_with_llm(query_text, cand_sample, clean_options):
-            return make_unmentioned_notice(query_text)
+            return make_unmentioned_notice(query_text) if has_abstain_choice else []
+
 
     # 7. Hard Bounded Payload:
     # A. Coding Scenario: filter out noise, prioritize complete patches, cap at top 2 cleanest <= 2,500 bytes total

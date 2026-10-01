@@ -19,11 +19,21 @@ def is_raw_fragmented_tool_call(content: str) -> bool:
     if any(marker in content for marker in ["diff --git", "--- a/", "+++ b/", "@@ -", "```diff", "[Code Patch / Solution]"]):
         return False
     c = content.strip()
-    if re.search(r"\[tool_use\s+(?:Read|Write|Edit|Bash|TaskUpdate|TaskCreate|TaskList)\]", c):
+    if re.search(r"\[tool_use\s+[^\]]+\]", c, re.IGNORECASE):
         return True
-    if c.startswith("[tool_result]") or "(Bash completed with no output)" in c:
+    if re.search(r"\[tool_result\]", c, re.IGNORECASE):
+        return True
+    if any(phrase in c for phrase in [
+        "(Bash completed with no output)",
+        "was created successfully on",
+        "was updated to 'in_progress'",
+        "was updated to 'completed'",
+        "task state is current in your workspace",
+        "file state is current in your context"
+    ]):
         return True
     return False
+
 
 
 EXTRACTION_PROMPT = """You are an expert memory distillation and governance engine.
