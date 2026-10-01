@@ -848,9 +848,9 @@ def search_hybrid(
                 elif q_file_mentions and q_modules and mentions_target_file and not mentions_target_module:
                     # Same filename from wrong module (e.g. timeseries/core.py when query explicitly asks for ascii/core.py)
                     base_score *= 0.25
-                elif q_file_mentions and not mentions_target_file and len(content) > 1200:
-                    # Demote huge code dumps that don't even mention the target file
-                    base_score *= 0.25
+                elif q_file_mentions and not mentions_target_file:
+                    # Demote any code candidates that fail to mention the explicitly queried source file
+                    base_score *= 0.35
 
             if has_diff:
                 diff_files = re.findall(r"(?:diff --git a/|--- a/|\+\+\+ b/)(\S+)", content)
@@ -906,7 +906,7 @@ def search_hybrid(
         noise_mult = 1.0
         if is_task_noise:
             noise_mult = 0.10
-        elif "__init__.py" in content and ("File created successfully" in content or "file state is current" in content):
+        elif "__init__.py" in content and "init" not in query_lower:
             noise_mult = 0.20
         elif bool(re.search(r"(_\s*){10,}", content)) or "============================= test session starts" in content:
             noise_mult = 0.20
