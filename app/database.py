@@ -812,6 +812,7 @@ def search_hybrid(
                 base_score *= 0.10
 
         # Code file & symbol awareness for coding queries
+        mismatched_diff = False
         if is_code_q:
             if specific_symbols:
                 matched_specific = sum(1 for sym in specific_symbols if sym in content_lower)
@@ -930,7 +931,7 @@ def search_hybrid(
             noise_mult = min(noise_mult, 0.40)
 
         # Elevate concrete resolution propositions and code diffs
-        if is_resolution and b_score > 0.001:
+        if is_resolution and b_score > 0.001 and not mismatched_diff:
             base_score += 0.65
 
         base_score *= noise_mult
