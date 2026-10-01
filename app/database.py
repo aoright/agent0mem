@@ -454,6 +454,10 @@ def search_hybrid(
     query_lower = query_text.lower()
     if is_spend_query and ("coffee" in query_lower or "maker" in query_lower):
         search_q += " nespresso espresso machine"
+    if clean_options:
+        substantive_opts = [opt for opt in clean_options if not any(kw in opt for kw in ABSTAIN_KEYWORDS)]
+        if substantive_opts:
+            search_q += " " + " ".join(substantive_opts)
     bm25_scores = dict(bm25.score(search_q))
 
     # 2. Temporal calculation
@@ -527,9 +531,9 @@ def search_hybrid(
 
             # Option bonus: if this relevant memory also mentions candidate options
             if clean_options:
-                matched_opts = sum(1 for opt_word in clean_options if opt_word in content_lower)
+                matched_opts = sum(1 for opt_word in clean_options if opt_in_memory(opt_word, content_lower) and not any(kw in opt_word for kw in ABSTAIN_KEYWORDS))
                 if matched_opts > 0:
-                    base_score += min(0.20, 0.10 * matched_opts) * rel_factor
+                    base_score += min(0.35, 0.20 * matched_opts) * max(0.5, rel_factor)
 
             # Entity Salience Alignment Bonus: prioritize memories mentioning queried named entities
             if salient_entities:
@@ -773,7 +777,7 @@ def search_hybrid(
 
     # Abstention guard: if the best candidate has virtually no semantic or lexical overlap, return explicit notice
     # This enables downstream answer generators to abstain correctly on unanswerable/out-of-scope questions
-    if deduped and deduped[0]["score"] < 0.05:
+    if deduped and deduped[0]["score"] < 0.05 and not has_opt_match:
         if is_spend_query and not has_spend_match:
             clean_q = query_text.strip().split("\n")[0]
             return [{
