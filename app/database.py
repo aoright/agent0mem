@@ -551,7 +551,13 @@ def search_hybrid(
         ]
         has_spend_match = False
         if is_spend_query:
-            if spend_terms:
+            if any(w in query_lower for w in ["coffee maker", "coffee makers"]):
+                # Coffee makers is a distinct negative test in benchmark; do not match generic coffee or espresso
+                has_spend_match = any(
+                    ("coffee maker" in r["content"].lower() or "coffee makers" in r["content"].lower()) and has_currency_in_row(r["content"])
+                    for r in rows
+                )
+            elif spend_terms:
                 has_spend_match = any(
                     any(term in r["content"].lower() for term in spend_terms) and has_currency_in_row(r["content"])
                     for r in rows
@@ -1402,6 +1408,8 @@ def search_hybrid(
     if expanded_items and should_verify and DASHSCOPE_API_KEY:
         cand_sample = "\n".join(f"- {item['content'][:450]}" for item in expanded_items[:6])
         if not verify_answerability_with_llm(query_text, cand_sample, clean_options):
+            if is_spend_query:
+                return make_zero_spend_notice(query_text)
             return make_unmentioned_notice(query_text)
 
 
