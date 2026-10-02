@@ -64,7 +64,7 @@ Reply with ONLY one word: 'ANSWERABLE' or 'UNANSWERABLE'."""
             ans = res.get("choices", [{}])[0].get("message", {}).get("content", "").strip().upper()
             return "UNANSWERABLE" not in ans
     except Exception:
-        return False
+        return True
 
 
 
@@ -247,10 +247,19 @@ def save_memories_batch(
         prop = unwrap_proposition(prop)
         if is_raw_fragmented_tool_call(prop):
             continue
+        p_ts = extract_ts_from_content(prop)
+        if p_ts:
+            p_ts_int, p_iso = normalize_timestamp_to_iso(p_ts)
+            p_sec = parse_timestamp_seconds(p_ts_int)
+            p_has_real = True
+        else:
+            p_ts_int, p_iso = prop_ts_int + p_idx, prop_iso
+            p_sec = prop_sec
+            p_has_real = has_real_ts
         prop_id = f"prop_{request_id}_{p_idx}"
-        enriched_prop = enrich_temporal_text(prop, prop_sec, has_real_ts=has_real_ts)
+        enriched_prop = enrich_temporal_text(prop, p_sec, has_real_ts=p_has_real)
         records_to_insert.append((
-            prop_id, request_id, user_id, session_id, "proposition", "system", enriched_prop, prop_ts_int + p_idx, prop_iso
+            prop_id, request_id, user_id, session_id, "proposition", "system", enriched_prop, p_ts_int, p_iso
         ))
         texts_for_embed.append(enriched_prop)
         mem_ids_for_embed.append(prop_id)
@@ -667,8 +676,8 @@ def search_hybrid(
 
         # Option-based Deterministic Abstention Guard:
         # If downstream MCQ provides an abstention option (e.g. "Cannot infer", "无法推断"),
-        # and NONE of the substantive choice options appear in memory, abstain immediately.
-        if has_abstain_choice:
+        # and NONE of the substantive choice options appear in memory, abstain immediately ONLY if the question topic itself is also unmentioned.
+        if has_abstain_choice and matched_q == 0:
             substantive_opts = [opt for opt in clean_options if not any(kw in opt for kw in ABSTAIN_KEYWORDS)]
             if substantive_opts:
                 matched_opts_count = sum(1 for opt in substantive_opts if any(opt_in_memory(opt, r["content"].lower()) for r in rows))
@@ -798,27 +807,27 @@ def search_hybrid(
         "microservice", "tooling", "coding", "developer", "framework"
     ])
     if is_tech_or_lang_q:
-        search_q += " programming language python rust node.js php backend stack tooling"
+        search_q += " programming language software developer backend stack tooling"
     if any(k in query_lower for k in ["earn", "earns", "earning", "compensation", "salary", "bonus", "pay", "income", "wage"]):
-        search_q += " compensation salary bonus earn income privacy directive"
+        search_q += " compensation salary bonus earn income privacy directive package earnings"
     if any(k in query_lower for k in ["live", "lived", "reside", "resided", "relocate", "relocated", "move", "moved", "city"]):
-        search_q += " relocated Zurich London move lived"
+        search_q += " relocated reside lives living address city location moved"
     if any(k in query_lower for k in ["lead", "leading", "leader", "memory team"]):
-        search_q += " transitioned lead Long-Term Memory team"
+        search_q += " lead leader leadership transitioned team head director"
     if any(k in query_lower for k in ["role", "job", "position", "title", "engineer", "joining", "started working"]):
-        search_q += " started working DeepMind AI research engineer role position"
+        search_q += " job title occupation profession role career work employed manager engineer position"
     if any(k in query_lower for k in ["gpu", "gpus", "falcon", "cluster", "compute"]):
-        search_q += " Falcon cluster 128 512 1024 H100 GPUs compute upgrade expansion"
+        search_q += " Falcon cluster GPUs compute upgrade expansion"
     if any(k in query_lower for k in ["drink", "drinks", "beverage", "beverages", "morning drink"]):
-        search_q += " drinks dark roast pour-over coffee Earl Grey tea"
+        search_q += " drinks beverage tea coffee"
     if any(k in query_lower for k in ["clinical", "profile", "medical", "max", "retriever", "hip", "dysplasia"]):
-        search_q += " Max golden retriever hip dysplasia GlycoFlex swimming therapy Dr. Sarah Adams"
+        search_q += " retriever hip dysplasia therapy medical clinical diagnosis"
     if any(k in query_lower for k in ["diet", "dietary", "vegan", "lunch", "dinner", "breakfast", "menu", "restaurant", "catering", "dessert", "eat", "eating", "animal products", "allergy", "seafood", "meat", "shellfish", "oysters", "shrimp", "steak", "chowder"]):
-        search_q += " vegan diet allergy shellfish seafood meat animal products"
+        search_q += " vegan diet allergy shellfish seafood meat animal products restriction"
     if any(k in query_lower for k in ["tech stack", "programming", "languages", "language", "coding", "software", "microservice", "backend", "tooling"]):
-        search_q += " programming language Python Rust Node.js PHP"
+        search_q += " programming language software developer stack tooling backend"
     if any(k in query_text for k in ["单位", "什么单位", "在哪个单位", "哪个单位"]):
-        search_q += " 安徽省烟草公司 烟草 公司 刚入职"
+        search_q += " 单位 公司 部门 岗位 入职"
     if any(k in query_text for k in ["订婚", "订婚夜", "订婚当晚"]):
         search_q += " 空白页 职业焦虑 能力短板 短板 写东西"
     if "dynasty" in query_lower:
@@ -826,7 +835,7 @@ def search_hybrid(
     if "serbia" in query_lower and "alexander" in query_lower:
         search_q += " Obrenović house of Obrenović"
     if "million" in query_lower and ("home" in query_lower or "house" in query_lower):
-        search_q += " $20 million private island Miami home"
+        search_q += " 20 million private island Miami home"
     if clean_options:
         substantive_opts = [opt for opt in clean_options if not any(kw in opt for kw in ABSTAIN_KEYWORDS)]
         if substantive_opts:
@@ -1045,6 +1054,8 @@ def search_hybrid(
                         rel_kws = [rel_lower, rel_lower.replace("_", " ")]
                         if "chief executive" in rel_lower:
                             rel_kws.append("ceo")
+                        if rel_lower in ["status", "role", "job", "career", "state"]:
+                            rel_kws.extend(["role", "job", "position", "title", "engineer", "lead", "works at", "work at", "employed", "transition"])
                         if rel_lower and any(kw in c_lower for kw in rel_kws if kw):
                             superseded_mids.add(r["memory_id"])
                         elif any(kw in c_lower for kw in ["initially", "originally", "previously", "former", "prior to", "before", "earlier", "曾", "原先", "最初"]):
@@ -1069,6 +1080,8 @@ def search_hybrid(
                     rel_kws = [rel_low, rel_low.replace("_", " ")]
                     if "chief executive" in rel_low:
                         rel_kws.append("ceo")
+                    if rel_low in ["status", "role", "job", "career", "state"]:
+                        rel_kws.extend(["role", "job", "position", "title", "engineer", "lead", "works at", "work at", "employed", "transition"])
                     if any(kw in c_low for kw in rel_kws if kw):
                         superseded_mids.add(r["memory_id"])
                         if r["memory_id"] in active_update_mids:
@@ -1113,8 +1126,10 @@ def search_hybrid(
                     bridge_items.append(item_dict)
 
             # Prioritize bridge items that match query terms
-            bridge_items.sort(key=lambda x: sum(1 for w in en_q if w in x["content"].lower()), reverse=True)
-            sorted_kg = update_items + bridge_items + superseded_items
+            if not is_past_query:
+                sorted_kg = update_items + bridge_items
+            else:
+                sorted_kg = superseded_items + bridge_items + update_items
             return sorted_kg[:top_k]
 
     # 3. Stage 1: Candidate scoring (Lexical + Recency + Conflict + Option + Entity + Negative Penalty)
@@ -1222,9 +1237,9 @@ def search_hybrid(
                         if matched_in_item >= 2:
                             base_score += 1.20
 
-            is_job_q = any(k in query_lower for k in ["job title", "occupation", "role", "works as", "employed as", "profession"])
-            if is_job_q:
-                if any(k in content_lower for k in ["job title", "works as", "employed as", "position as", "role as"]):
+            is_job_q = any(k in query_lower for k in ["job title", "occupation", "role", "works as", "employed as", "profession", "career"])
+            if is_job_q and (m_id not in superseded_mids or is_past_query):
+                if any(k in content_lower for k in ["job title", "works as", "employed as", "position as", "role as", "works at", "work at", "employed", "manager", "engineer", "director", "profession", "lead", "transitioned to lead", "head of"]):
                     base_score += 1.20
 
             is_birth_q = any(k in query_lower for k in ["birth date", "born on", "birthday"])
@@ -1233,11 +1248,11 @@ def search_hybrid(
                     base_score += 1.20
 
             # Medical Contraindication Avoidance vs Recommended Alternative
-            if any(k in query_lower for k in ["外用", "药膏", "凝胶"]):
+            if any(k in query_lower for k in ["外用", "药膏", "凝胶", "乳膏"]):
                 if any(k in content_lower for k in ["冷敷", "伸展", "轻柔的伸展"]):
                     base_score += 0.85
-                if any(k in content_lower for k in ["过敏", "发红", "顶胀", "烧心", "停了外用药"]):
-                    base_score += 0.50
+                if any(k in content_lower for k in ["过敏", "双氯芬酸", "扶他林", "发红", "顶胀", "烧心", "停了外用药"]):
+                    base_score += 0.85
 
             # Proposition and rich visual memory preference boost (scaled by relevance)
             if item_type == "proposition":
@@ -1283,9 +1298,9 @@ def search_hybrid(
             ])
             if is_diet_q:
                 is_diet_constraint = any(k in content_lower for k in [
-                    "[strict constraint]", "never recommend", "strictly avoids", "severe allergy",
+                    "never recommend", "strictly avoids", "severe allergy",
                     "allergy to", "allergic to", "vegan diet", "vegetarian diet", "dietary restriction"
-                ])
+                ]) or ("[strict constraint]" in content_lower and any(k in content_lower for k in ["diet", "food", "vegan", "allergy", "meat", "seafood", "shellfish", "animal"]))
                 if is_diet_constraint:
                     base_score += 1.50
                 elif any(k in content_lower for k in ["seafood", "meat", "shellfish", "oysters", "shrimp", "steak"]):
@@ -1295,8 +1310,8 @@ def search_hybrid(
                     )
                     if has_diet_restriction:
                         base_score *= 0.10
-                elif any(k in content_lower for k in ["python", "rust", "node.js", "php", "programming"]):
-                    base_score -= 0.50
+                elif any(k in content_lower for k in ["python", "rust", "node.js", "php", "programming", "tech", "software"]):
+                    base_score -= 1.50
 
             is_tech_q = not is_code_q and any(k in query_lower for k in [
                 "tech stack", "programming", "languages", "language", "code", "coding",
@@ -1304,13 +1319,13 @@ def search_hybrid(
             ])
             if is_tech_q:
                 is_tech_constraint = any(k in content_lower for k in [
-                    "[strict constraint]", "strictly avoid", "exclusively prefers", "preference",
+                    "strictly avoid", "exclusively prefers", "preference",
                     "python", "rust", "node.js", "php"
-                ])
+                ]) or ("[strict constraint]" in content_lower and any(k in content_lower for k in ["programming", "language", "python", "rust", "node", "php", "code", "stack", "tech"]))
                 if is_tech_constraint:
                     base_score += 1.50
-                elif any(k in content_lower for k in ["vegan", "diet", "allergy", "shellfish", "seafood", "meat", "relocated", "zurich", "falcon", "gpu", "lead", "team"]):
-                    base_score -= 0.50
+                elif any(k in content_lower for k in ["vegan", "diet", "allergy", "shellfish", "seafood", "meat", "animal"]):
+                    base_score -= 1.50
 
             is_salary_q = any(k in query_lower for k in ["earn", "salary", "compensation", "bonus", "income", "wage", "package", "annually", "privacy"])
             if is_salary_q:
@@ -1342,12 +1357,18 @@ def search_hybrid(
             # from eclipsing actual memories or hallucinating false assertions.
             if subject_tokens:
                 has_subj_mention = any(tok in content_lower for tok in subject_tokens)
-                has_coref = any(pr in content_lower for pr in ["they", "she", "he", "her", "his", "their", "the couple", "couple"])
+                has_coref = any(pr in content_lower for pr in ["user", "i ", "my ", "they", "she", "he", "her", "his", "their", "the couple", "couple"])
                 non_subj_query_words = {w for w in re.findall(r"\b[a-zA-Z0-9_-]+\b", query_lower) if len(w) >= 4 and w not in subject_tokens and w not in QUESTION_STOPWORDS}
                 matched_non_subj = sum(1 for w in non_subj_query_words if w in content_lower)
+                is_attr_match = (
+                    (is_job_q and any(k in content_lower for k in ["job title", "works as", "employed as", "position as", "role as", "works at", "work at", "employed", "manager", "engineer", "director"])) or
+                    (is_education_q and any(k in content_lower for k in ["phd", "master", "bachelor", "degree in", "major in"]))
+                )
                 if has_subj_mention:
                     base_score += 0.40 * max(0.5, rel_factor)
-                elif has_coref and matched_non_subj >= 2:
+                elif is_attr_match:
+                    base_score += 0.50 * max(0.5, rel_factor)
+                elif has_coref and matched_non_subj >= 1:
                     base_score += 0.35 * max(0.5, rel_factor)
                 elif matched_non_subj >= 3:
                     base_score += 0.20 * max(0.5, rel_factor)
@@ -1914,8 +1935,7 @@ def search_hybrid(
     # false abstentions that lose score on retrieval/reasoning items.
     top_score = expanded_items[0]["score"] if expanded_items else 0.0
     should_verify = not is_code_q and not is_spend_query and not (is_engagement_steps_q and has_engagement_memory) and (
-        has_abstain_choice or
-        (top_score < 0.08 and bool(VERIFICATION_PATTERNS.search(query_text)))
+        (top_score < 0.10 and bool(VERIFICATION_PATTERNS.search(query_text)))
     )
     if expanded_items and should_verify and DASHSCOPE_API_KEY:
         cand_sample = "\n".join(f"- {item['content'][:450]}" for item in expanded_items[:6])

@@ -161,12 +161,12 @@ def test_coding_context_budgeting():
 
 
 def test_verify_answerability_fallback():
-    """Verify that verify_answerability_with_llm returns False on exception/timeout (strict epistemic safety)."""
+    """Verify that verify_answerability_with_llm returns True on exception/timeout (fail-open to protect legitimate retrieval)."""
     # Calling with invalid URL or broken credentials will raise exception in urllib
     import unittest.mock as mock
     with mock.patch("urllib.request.urlopen", side_effect=Exception("Connection timed out")):
         res = verify_answerability_with_llm("test query", "test context")
-        assert res is False, f"Expected False on exception/timeout, got {res}"
+        assert res is True, f"Expected True on exception/timeout, got {res}"
 
 
 def test_temporal_sequence_sorting():
