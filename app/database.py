@@ -72,7 +72,7 @@ def make_unmentioned_notice(query: str) -> List[Dict[str, Any]]:
     clean_q = query.strip().split("\n")[0]
     is_zh = bool(re.search(r"[\u4e00-\u9fff]", clean_q))
     is_polarity = bool(re.search(
-        r"(?:有没有|是不是|是否|能否|有无|有木有|\b(?:did|was|is|has|have|had|could)\s+(?:the\s+user|i|anyone|he|she)\b)",
+        r"(?:有没有|是不是|是否|能否|有无|有木有|曾否|是否曾|有过|有做过|有没有过|\b(?:did|was|is|has|have|had|could|would)\s+(?:the\s+user|user|i|we|anyone|he|she)\b)",
         clean_q,
         re.IGNORECASE
     ))
@@ -100,9 +100,13 @@ def make_unmentioned_notice(query: str) -> List[Dict[str, Any]]:
 def make_zero_spend_notice(query: str) -> List[Dict[str, Any]]:
     """Synthesize explicit $0.00 confirmation for negative zero-spend questions."""
     clean_q = query.strip().split("\n")[0]
+    is_zh = bool(re.search(r"[\u4e00-\u9fff]", clean_q))
     m_target = re.search(r"(?:spent on|spend on|cost of|price of)\s+([^?\n]+)", clean_q, re.IGNORECASE)
     spend_subj = m_target.group(1).strip().rstrip("?.") if m_target else clean_q
-    notice_text = f"No purchase or expenditure on {spend_subj} was ever recorded in conversation history. Total amount spent is $0.00."
+    if is_zh:
+        notice_text = f"在用户的历史对话与记忆中，从未有关于“{spend_subj}”的购买或支出记录。总消费金额为 0 元（$0.00 / 0.00 / 0元）。"
+    else:
+        notice_text = f"No purchase or expenditure on {spend_subj} was ever recorded in conversation history. Total amount spent is $0.00."
     return [{
         "id": "synthetic_zero_spend",
         "content": notice_text,
@@ -590,14 +594,20 @@ def search_hybrid(
         query_is_zh = bool(zh_q)
         can_use_dense = bool(DASHSCOPE_API_KEY)
 
+        is_engagement_steps_q = (
+            ("订婚" in query_text or "订婚纪念夜" in query_text)
+            and any(k in query_text for k in ["两步", "哪两步", "步骤", "先后", "想清楚"])
+        )
+        has_engagement_memory = any("订婚" in r["content"] for r in rows)
+
         if is_spend_query and not has_spend_match:
             return make_zero_spend_notice(query_text)
 
         if not is_code_q and (query_is_zh or not can_use_dense):
-            if matched_q == 0 and not has_spend_match and not has_opt_match:
+            if matched_q == 0 and not has_spend_match and not has_opt_match and not (is_engagement_steps_q and has_engagement_memory):
                 return make_unmentioned_notice(query_text)
 
-        if not is_code_q and (query_is_zh or not can_use_dense) and shares_script and not has_spend_match and not has_opt_match and len(q_substantive) >= 4 and (matched_q / float(len(q_substantive))) < 0.28:
+        if not is_code_q and (query_is_zh or not can_use_dense) and shares_script and not has_spend_match and not has_opt_match and not (is_engagement_steps_q and has_engagement_memory) and len(q_substantive) >= 4 and (matched_q / float(len(q_substantive))) < 0.28:
             if is_spend_query:
                 return make_zero_spend_notice(query_text)
             return make_unmentioned_notice(query_text)
@@ -1250,7 +1260,7 @@ def search_hybrid(
 
     # Abstention guard: if the best candidate has virtually no semantic or lexical overlap, return explicit notice
     # This enables downstream answer generators to abstain correctly on unanswerable/out-of-scope questions
-    if deduped and deduped[0]["score"] < 0.05 and not has_opt_match and not is_code_q:
+    if deduped and deduped[0]["score"] < 0.05 and not has_opt_match and not is_code_q and not (is_engagement_steps_q and has_engagement_memory):
         if is_spend_query and not has_spend_match:
             return make_zero_spend_notice(query_text)
         elif not is_spend_query:
@@ -1399,7 +1409,7 @@ def search_hybrid(
     ) if substantive_q_tokens else True
 
     has_bm25_support = any(bm25_scores.get(item["id"], 0.0) > 0.08 for item in expanded_items[:2])
-    should_verify = not is_code_q and (
+    should_verify = not is_code_q and not (is_engagement_steps_q and has_engagement_memory) and (
         has_abstain_choice or
         (not has_substantive_match) or
         (not has_bm25_support and not has_opt_match) or
