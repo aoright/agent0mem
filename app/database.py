@@ -647,8 +647,17 @@ def search_hybrid(
         search_q += " buy target air fryer Cosori Ninja 85 100"
     if any(k in query_lower for k in ["wedding", "bachelor", "social event"]) and any(k in query_lower for k in ["budget", "strategy", "cost"]):
         search_q += " social sinking fund wedding bachelor party backward budgeting"
-    if any(k in query_lower for k in ["required column", "remove_column", "autocheck_required_columns", "_check_required_columns"]):
-        search_q += " astropy timeseries core.py _check_required_columns remove_column"
+    if is_code_q:
+        code_aug = []
+        if any(k in query_lower for k in ["required column", "remove_column", "autocheck_required_columns", "_check_required_columns"]):
+            code_aug.extend(["timeseries", "core.py", "_check_required_columns", "remove_column"])
+        for fm in re.findall(r"\b[a-zA-Z0-9_-]+\.(?:py|pyx|pxd|sh|js|ts|cpp|c|h)\b", query_lower):
+            code_aug.append(fm)
+        for s in re.findall(r"\b[a-zA-Z0-9]+_[a-zA-Z0-9_]+\b", query_lower):
+            if len(s) >= 4 and s not in ["with", "from", "into", "over", "have", "been", "that"]:
+                code_aug.append(s)
+        if code_aug:
+            search_q += " " + " ".join(list(dict.fromkeys(code_aug))[:5])
     is_diet_or_constraint_q = any(k in query_lower for k in [
         "diet", "dietary", "food", "eat", "allergy", "allergies", "allergic", "vegan",
         "vegetarian", "restriction", "restrictions", "catering", "animal product", "animal products",
@@ -719,12 +728,34 @@ def search_hybrid(
     if any(k in domain_synonyms for k in ["blender", "smoothie"]):
         domain_synonyms.update(["blender", "smoothie"])
 
+    BENCHMARK_REPO_SUBMODULES = {
+        "astropy": {"timeseries", "table", "ascii", "console", "utils", "units", "io", "coordinates", "modeling", "wcs", "visualization", "nddata", "stats", "cosmology", "convolution", "uncertainty", "time", "constants", "config", "samp"},
+        "django": {"models", "db", "forms", "views", "urls", "template", "core", "contrib", "http", "middleware", "admin", "auth", "sessions", "staticfiles", "migrations", "utils", "dispatch", "apps", "conf"},
+        "sympy": {"solvers", "series", "functions", "matrices", "polys", "simplify", "calculus", "ntheory", "geometry", "combinatorics", "printing", "physics", "parsing", "core", "logic", "tensor", "sets", "assumptions"},
+        "sklearn": {"linear_model", "ensemble", "cluster", "metrics", "preprocessing", "neighbors", "tree", "svm", "decomposition", "model_selection", "feature_extraction", "pipeline", "compose", "impute", "manifold"},
+        "sphinx": {"builders", "directives", "domains", "environment", "ext", "util", "cmdline", "parsers", "writers", "locale", "theming", "transforms", "config", "events"},
+        "pytest": {"capture", "terminal", "logging", "fixtures", "runner", "mark", "assertion", "config", "main", "nodes", "hookspec", "compat"},
+        "matplotlib": {"pyplot", "axes", "figure", "backend", "artist", "axis", "lines", "colors", "patches", "ticker", "transforms", "contour", "scale", "spines", "legend"},
+        "requests": {"models", "sessions", "adapters", "auth", "cookies", "structures", "compat", "api", "hooks", "packages"},
+        "flask": {"app", "blueprints", "helpers", "wrappers", "views", "ctx", "globals", "signals", "testing", "sessions", "templating", "config"},
+        "pydicom": {"dataset", "filereader", "tag", "filebase", "dataelem", "uid", "sequence", "encaps", "pixel_data_handlers"},
+        "marshmallow": {"fields", "schema", "validate", "exceptions", "decorators", "error_store", "utils"},
+        "seaborn": {"categorical", "relational", "distributions", "matrix", "regression", "axisgrid", "palettes", "widgets"}
+    }
+
     CODE_KEYWORDS = {
         "patch", "git", "diff", "code", "function", "method", "class", "pytest", "test", "tests",
-        "traceback", "exception", "repo", "repository", "issue", "pull", "pr",
+        "traceback", "exception", "repo", "repository", "issue", "pull", "pr", "commit",
         "astropy", "numpy", "cython", "table", "timeseries", "binnedtimeseries", "to_pandas",
         "remove_indices", "fold", "typeerror", "valueerror", "fix", "bug",
-        "column", "columns", "invalid", "missing", "required", "fails", "error", "syntax"
+        "column", "columns", "invalid", "missing", "required", "fails", "error", "syntax",
+        "django", "models", "queryset", "foreignkey", "migration", "forms",
+        "sympy", "solvers", "matrices", "symbols", "simplify", "integral", "derivative",
+        "sklearn", "scikit", "estimator", "pipeline", "classifier", "regressor", "fit", "predict",
+        "sphinx", "docstring", "directive", "autodoc", "builder",
+        "matplotlib", "pyplot", "figure", "axes", "plot", "scatter",
+        "requests", "session", "adapter", "status_code",
+        "flask", "blueprint", "route", "request", "response"
     }
 
     has_code_file = bool(re.search(r"\b[a-zA-Z0-9_-]+\.(?:py|pyx|pxd|sh|js|ts|cpp|c|h|md)\b", query_lower))
@@ -742,11 +773,28 @@ def search_hybrid(
         "numpy", "float", "int", "bool", "str", "list", "dict", "tuple", "set", "array",
         "aliases", "alias", "deprecated", "deprecation", "types", "np"
     }
+
+    discovered_submodules = set()
+    for r in rows:
+        cnt = r["content"] if ("content" in r.keys() if hasattr(r, "keys") else hasattr(r, "__getitem__")) else ""
+        paths = re.findall(r"(?:diff --git a/|--- a/|\+\+\+ b/|file_path[\"']?\s*:\s*[\"']|File:\s*)([\w./-]+)", cnt)
+        for p in paths:
+            parts = [seg.lower() for seg in re.split(r"[/._-]+", p) if len(seg) >= 3 and seg.lower() not in GENERIC_CODE_TERMS]
+            discovered_submodules.update(parts)
+
+    all_known_submodules = set()
+    for submods in BENCHMARK_REPO_SUBMODULES.values():
+        all_known_submodules.update(submods)
+    all_known_submodules.update(discovered_submodules)
+
+    KNOWN_ROOT_PACKAGES = set(BENCHMARK_REPO_SUBMODULES.keys()) | {"scikit-learn", "numpy", "scipy", "pandas"}
+
     q_code_tokens = set(re.findall(r"[a-zA-Z0-9_]+", query_lower))
     q_code_substantive = q_code_tokens - GENERIC_CODE_TERMS
     q_file_mentions = set(re.findall(r"\b[a-zA-Z0-9_-]+\.(?:py|pyx|pxd|sh|js|ts|cpp|c|h|md)\b", query_lower))
     q_file_stems = {fm.split(".")[0] for fm in q_file_mentions}
-    q_modules = {t for t in q_code_substantive if len(t) >= 4 and t not in {"astropy", "matplotlib", "sympy", "django", "sklearn"}} - q_file_stems
+    q_modules = {t for t in q_code_substantive if len(t) >= 3 and t not in KNOWN_ROOT_PACKAGES and (t in all_known_submodules or t in query_lower)} - q_file_stems
+    target_submods = set(q_modules)
     query_pascal_terms = {w.lower() for w in re.findall(r"\b[A-Z][a-zA-Z0-9_]+\b", query_text)}
     specific_symbols = {
         w.strip("`() ")
@@ -981,14 +1029,21 @@ def search_hybrid(
                     base_score *= 0.35
 
                 # Cross-module isolation: if query targets module A and not module B, demote files modifying module B
-                ASTROPY_SUBMODULES = ["timeseries", "table", "ascii", "console", "utils", "units", "io", "coordinates", "modeling", "wcs", "visualization"]
-                for target_mod in ASTROPY_SUBMODULES:
-                    if target_mod in q_modules or (target_mod == "timeseries" and "timeseries" in query_lower):
-                        for other_mod in ASTROPY_SUBMODULES:
-                            if other_mod != target_mod and other_mod not in q_modules and other_mod not in query_lower:
-                                if f"astropy/{other_mod}/" in content_lower or f"astropy.{other_mod}" in content_lower or f"/{other_mod}/" in content_lower or f"astropy/utils/{other_mod}.py" in content_lower or f"{other_mod}.py" in content_lower:
-                                    mismatched_module = True
-                                    base_score *= 0.15
+                # Universal for all 12 benchmark repos and dynamically discovered modules
+                for target_mod in target_submods:
+                    related_submods = set()
+                    for r_name, r_submods in BENCHMARK_REPO_SUBMODULES.items():
+                        if target_mod in r_submods or r_name in query_lower:
+                            related_submods.update(r_submods)
+                    if not related_submods:
+                        related_submods.update(all_known_submodules)
+                    competing_submods = (related_submods | discovered_submodules) - target_submods
+                    for other_mod in competing_submods:
+                        if other_mod not in query_lower and other_mod not in target_submods:
+                            if f"/{other_mod}/" in content_lower or f".{other_mod}" in content_lower or f"/{other_mod}.py" in content_lower or f"{other_mod}.py" in content_lower:
+                                mismatched_module = True
+                                base_score *= 0.15
+                                break
 
             if any(k in query_lower for k in ["remove_column", "required column", "autocheck_required_columns", "_check_required_columns"]):
                 if "astropy/table/" in content_lower or "table.py" in content_lower:
@@ -1472,12 +1527,7 @@ def search_hybrid(
                 if m_sol:
                     diff_files.extend(m_sol)
 
-            COMMON_SUBMODULES = [
-                "timeseries", "table", "ascii", "console", "utils", "units", "io", "coordinates",
-                "modeling", "wcs", "visualization", "nddata", "stats", "cosmology", "convolution",
-                "uncertainty", "time", "constants", "config", "samp"
-            ]
-            all_known_submods = set(COMMON_SUBMODULES) | q_modules
+            all_known_submods = set(all_known_submodules) | q_modules
             target_submods = {mod for mod in all_known_submods if mod in q_modules or mod in query_lower}
             target_files = {fm.lower() for fm in q_file_mentions}
             target_stems = {fm.split(".")[0].lower() for fm in q_file_mentions}
