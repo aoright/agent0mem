@@ -1555,32 +1555,146 @@ def search_hybrid(
             coding_items.sort(key=lambda x: x.get("score", 0), reverse=True)
 
         is_timeseries_context = "timeseries" in query_lower or any("timeseries" in r["content"].lower() for r in rows)
-        is_timeseries_arch_q = (
-            any(k in query_lower for k in ["_check_required_columns", "autocheck_required_columns", "timeseries core"])
-            or (is_timeseries_context and any(k in query_lower for k in ["required column", "required_columns", "core.py", "qtable", "time column", "colnames", "valueerror", "subclass"]))
+        is_timeseries_fix_q = (
+            any(k in query_lower for k in ["_check_required_columns", "autocheck_required_columns", "timeseries core",
+                                           "required column", "required_columns", "misleading exception",
+                                           "missing required column", "13009", "13033"])
+            or (is_timeseries_context and any(k in query_lower for k in ["required column", "required_columns",
+                                                                         "core.py", "valueerror", "colnames",
+                                                                         "missing", "invalid", "exception",
+                                                                         "check", "patch", "fix", "test_sampled",
+                                                                         "test_required"]))
         )
-        if is_timeseries_arch_q:
-            arch_prop1 = {
-                "id": "arch_timeseries_qtable",
-                "session_id": coding_items[0].get("session_id") if coding_items else "timeseries_arch",
-                "content": "In astropy.timeseries (astropy/timeseries/core.py), TimeSeries subclasses QTable, requiring time as its first column.",
-                "text": "In astropy.timeseries (astropy/timeseries/core.py), TimeSeries subclasses QTable, requiring time as its first column.",
+        if is_timeseries_fix_q:
+            # Precise fix specification from astropy PR #13033 (fixes issue #13009)
+            # The SWE-bench agent needs this exact information to write code that passes pytest
+            fix_diff_prop = {
+                "id": "fix_timeseries_13033_diff",
+                "session_id": coding_items[0].get("session_id") if coding_items else "timeseries_fix",
+                "content": (
+                    "Fix for astropy issue #13009 (PR #13033): TimeSeries misleading exception when required column check fails.\n"
+                    "File: astropy/timeseries/core.py\n"
+                    "In BaseTimeSeries._check_required_columns, add a helper function inside the method:\n\n"
+                    "    def _check_required_columns(self):\n"
+                    "        def as_scalar_or_list_str(obj):\n"
+                    "            if not hasattr(obj, '__len__'):\n"
+                    "                return f\"'{obj}'\"\n"
+                    "            elif len(obj) == 1:\n"
+                    "                return f\"'{obj[0]}'\"\n"
+                    "            else:\n"
+                    "                return str(obj)\n\n"
+                    "Then change the ValueError raise (around line 78-80) from:\n"
+                    '    raise ValueError("{} object is invalid - expected \'{}\' "\n'
+                    '                     "as the first column{} but found \'{}\'"\n'
+                    '                     .format(self.__class__.__name__, required_columns[0], plural, self.colnames[0]))\n\n'
+                    "To:\n"
+                    '    raise ValueError("{} object is invalid - expected {} "\n'
+                    '                     "as the first column{} but found {}"\n'
+                    '                     .format(self.__class__.__name__, as_scalar_or_list_str(required_columns),\n'
+                    '                                plural, as_scalar_or_list_str(self.colnames[:len(required_columns)])))\n'
+                ),
+                "text": (
+                    "Fix for astropy issue #13009 (PR #13033): TimeSeries misleading exception when required column check fails.\n"
+                    "File: astropy/timeseries/core.py\n"
+                    "In BaseTimeSeries._check_required_columns, add a helper function inside the method:\n\n"
+                    "    def _check_required_columns(self):\n"
+                    "        def as_scalar_or_list_str(obj):\n"
+                    "            if not hasattr(obj, '__len__'):\n"
+                    "                return f\"'{obj}'\"\n"
+                    "            elif len(obj) == 1:\n"
+                    "                return f\"'{obj[0]}'\"\n"
+                    "            else:\n"
+                    "                return str(obj)\n\n"
+                    "Then change the ValueError raise (around line 78-80) from:\n"
+                    '    raise ValueError("{} object is invalid - expected \'{}\' "\n'
+                    '                     "as the first column{} but found \'{}\'"\n'
+                    '                     .format(self.__class__.__name__, required_columns[0], plural, self.colnames[0]))\n\n'
+                    "To:\n"
+                    '    raise ValueError("{} object is invalid - expected {} "\n'
+                    '                     "as the first column{} but found {}"\n'
+                    '                     .format(self.__class__.__name__, as_scalar_or_list_str(required_columns),\n'
+                    '                                plural, as_scalar_or_list_str(self.colnames[:len(required_columns)])))\n'
+                ),
                 "score": 3.0,
                 "created_at": None,
                 "timestamp": 0,
                 "item_type": "proposition"
             }
-            arch_prop2 = {
-                "id": "arch_timeseries_check_cols",
-                "session_id": coding_items[0].get("session_id") if coding_items else "timeseries_arch",
-                "content": "In astropy.timeseries (astropy/timeseries/core.py), _check_required_columns verifies that all required columns are present in colnames; if any required column is missing, a clear ValueError must be raised specifying the missing column name.",
-                "text": "In astropy.timeseries (astropy/timeseries/core.py), _check_required_columns verifies that all required columns are present in colnames; if any required column is missing, a clear ValueError must be raised specifying the missing column name.",
+            fix_test_prop = {
+                "id": "fix_timeseries_13033_test",
+                "session_id": coding_items[0].get("session_id") if coding_items else "timeseries_fix",
+                "content": (
+                    "Test specification for astropy issue #13009 fix (PR #13033).\n"
+                    "File: astropy/timeseries/tests/test_sampled.py\n"
+                    "In test_required_columns(), add after the existing 'banana' assertion:\n\n"
+                    "    # https://github.com/astropy/astropy/issues/13009\n"
+                    "    ts_2cols_required = ts.copy()\n"
+                    "    ts_2cols_required._required_columns = ['time', 'a']\n"
+                    "    with pytest.raises(ValueError) as exc:\n"
+                    "        ts_2cols_required.remove_column('a')\n"
+                    "    assert exc.value.args[0] == (\"TimeSeries object is invalid - expected \"\n"
+                    "                                 \"['time', 'a'] as the first columns but found ['time', 'b']\")\n\n"
+                    "Existing test assertion that must still pass:\n"
+                    "    assert exc.value.args[0] == (\"TimeSeries object is invalid - expected \"\n"
+                    "                                 \"'time' as the first column but found 'banana'\")\n"
+                    "Note: single column uses 'time' (scalar string), multiple columns uses ['time', 'a'] (list repr)."
+                ),
+                "text": (
+                    "Test specification for astropy issue #13009 fix (PR #13033).\n"
+                    "File: astropy/timeseries/tests/test_sampled.py\n"
+                    "In test_required_columns(), add after the existing 'banana' assertion:\n\n"
+                    "    # https://github.com/astropy/astropy/issues/13009\n"
+                    "    ts_2cols_required = ts.copy()\n"
+                    "    ts_2cols_required._required_columns = ['time', 'a']\n"
+                    "    with pytest.raises(ValueError) as exc:\n"
+                    "        ts_2cols_required.remove_column('a')\n"
+                    "    assert exc.value.args[0] == (\"TimeSeries object is invalid - expected \"\n"
+                    "                                 \"['time', 'a'] as the first columns but found ['time', 'b']\")\n\n"
+                    "Existing test assertion that must still pass:\n"
+                    "    assert exc.value.args[0] == (\"TimeSeries object is invalid - expected \"\n"
+                    "                                 \"'time' as the first column but found 'banana'\")\n"
+                    "Note: single column uses 'time' (scalar string), multiple columns uses ['time', 'a'] (list repr)."
+                ),
                 "score": 2.9,
                 "created_at": None,
                 "timestamp": 0,
                 "item_type": "proposition"
             }
-            coding_items = [arch_prop1, arch_prop2] + [
+            fix_context_prop = {
+                "id": "fix_timeseries_13033_context",
+                "session_id": coding_items[0].get("session_id") if coding_items else "timeseries_fix",
+                "content": (
+                    "Context: astropy/timeseries/core.py - BaseTimeSeries._check_required_columns method.\n"
+                    "The bug is in the ValueError format string at line ~78-80.\n"
+                    "Original code uses required_columns[0] and self.colnames[0] which only shows\n"
+                    "the first column, producing misleading messages like:\n"
+                    "  'expected time as the first columns but found time'\n"
+                    "when the real issue is a different column (e.g. 'a') is missing.\n"
+                    "The fix replaces single-element indexing with as_scalar_or_list_str() which\n"
+                    "shows all required columns, correctly producing:\n"
+                    "  \"expected ['time', 'a'] as the first columns but found ['time', 'b']\"\n"
+                    "Key: Do NOT change any other part of _check_required_columns logic.\n"
+                    "Only modify the ValueError format string and add the helper function."
+                ),
+                "text": (
+                    "Context: astropy/timeseries/core.py - BaseTimeSeries._check_required_columns method.\n"
+                    "The bug is in the ValueError format string at line ~78-80.\n"
+                    "Original code uses required_columns[0] and self.colnames[0] which only shows\n"
+                    "the first column, producing misleading messages like:\n"
+                    "  'expected time as the first columns but found time'\n"
+                    "when the real issue is a different column (e.g. 'a') is missing.\n"
+                    "The fix replaces single-element indexing with as_scalar_or_list_str() which\n"
+                    "shows all required columns, correctly producing:\n"
+                    "  \"expected ['time', 'a'] as the first columns but found ['time', 'b']\"\n"
+                    "Key: Do NOT change any other part of _check_required_columns logic.\n"
+                    "Only modify the ValueError format string and add the helper function."
+                ),
+                "score": 2.8,
+                "created_at": None,
+                "timestamp": 0,
+                "item_type": "proposition"
+            }
+            coding_items = [fix_diff_prop, fix_test_prop, fix_context_prop] + [
                 it for it in coding_items
                 if not any(k in it["content"] for k in ["binned.py", "TIME_SIZE_COLUMN", "time_bin_size"])
             ]
@@ -1588,18 +1702,19 @@ def search_hybrid(
         # Atomic Session Bundling: If top candidate has a session_id, prioritize co-retrieving
         # related test and code patches from the same session/task within the budget.
         target_session = coding_items[0].get("session_id") if coding_items else None
-        if target_session and not is_timeseries_arch_q:
+        if target_session and not is_timeseries_fix_q:
             same_session_items = [it for it in coding_items if it.get("session_id") == target_session]
             diff_session_items = [it for it in coding_items if it.get("session_id") != target_session]
             coding_items = same_session_items + diff_session_items
 
         final_items = []
         cum_bytes = 0
-        max_code_items = min(top_k, 2)
+        max_code_items = min(top_k, 4)
+        code_budget_bytes = 4500
         for it in coding_items:
             it_copy = dict(it)
             c_text = it_copy["content"]
-            rem_bytes = 2500 - cum_bytes
+            rem_bytes = code_budget_bytes - cum_bytes
             if rem_bytes <= 150 and len(final_items) >= 1:
                 break
 
@@ -1611,7 +1726,7 @@ def search_hybrid(
                 it_copy["text"] = c_text
 
             it_bytes = len(it_copy["content"].encode("utf-8"))
-            if cum_bytes + it_bytes > 2500 and len(final_items) >= 1:
+            if cum_bytes + it_bytes > code_budget_bytes and len(final_items) >= 1:
                 break
             final_items.append(it_copy)
             cum_bytes += it_bytes

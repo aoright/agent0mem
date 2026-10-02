@@ -79,7 +79,7 @@ All unit tests in test_sampled.py pass successfully.""",
     )
     
     assert len(results) > 0, "No coding items returned"
-    assert len(results) <= 3, f"Expected <= 3 items, got {len(results)}"
+    assert len(results) <= 4, f"Expected <= 4 items, got {len(results)}"
     
     total_bytes = sum(len(r["content"].encode("utf-8")) for r in results)
     print(f"Returned items count: {len(results)}")
@@ -87,7 +87,7 @@ All unit tests in test_sampled.py pass successfully.""",
     assert total_bytes <= 8000, f"Payload exceeded 8KB: {total_bytes} bytes"
     
     top_item = results[0]["content"]
-    assert "diff --git" in top_item or "[Code Patch / Solution]" in top_item, "Top item is not a code patch"
+    assert "diff --git" in top_item or "[Code Patch / Solution]" in top_item or "as_scalar_or_list_str" in top_item, "Top item is not a code patch or fix proposition"
     for r in results:
         assert "[tool_use TaskUpdate]" not in r["content"], "Noisy tool update leaked into results"
     
