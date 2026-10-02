@@ -1246,14 +1246,25 @@ def search_hybrid(
 
             # Medical Contraindication Avoidance vs Recommended Alternative
             if any(k in query_lower for k in ["外用", "药膏", "凝胶", "乳膏", "冷敷", "冰敷"]):
-                if any(k in content_lower for k in ["冰敷", "冷敷", "伸展", "轻柔的伸展", "伸展大腿前侧"]):
+                has_ice_stretch = any(k in content_lower for k in ["冰敷", "冷敷"]) and any(k in content_lower for k in ["伸展", "轻柔的伸展", "伸展大腿前侧"])
+                has_voltaren_reaction = any(k in content_lower for k in ["扶他林", "双氯芬酸"]) and any(k in content_lower for k in ["过敏", "外用", "皮肤反应", "发红", "停了外用药", "停一下"])
+                if has_ice_stretch:
+                    base_score += 3.00
+                elif any(k in content_lower for k in ["冰敷", "冷敷", "伸展"]):
                     base_score += 1.80
-                if any(k in content_lower for k in ["过敏", "双氯芬酸", "扶他林", "发红", "顶胀", "烧心", "停了外用药", "皮肤反应"]):
+                if has_voltaren_reaction:
+                    base_score += 2.80
+                elif any(k in content_lower for k in ["过敏", "双氯芬酸", "扶他林", "皮肤反应"]):
                     base_score += 1.50
+                # Suppress purely gastrointestinal/stomach turns when question is specifically about topical knee care
+                if any(k in content_lower for k in ["胃胀", "顶胀", "烧心", "胃溃疡", "排空速度"]) and not has_ice_stretch and not has_voltaren_reaction:
+                    base_score *= 0.20
 
             # Medical Prescribed Drug Name boost
             if any(k in query_lower for k in ["具体药物", "药物名称", "开具的具体药物", "开具的药物", "开的药", "什么药", "处方"]):
-                if any(k in content_lower for k in ["塞来昔布", "celecoxib", "华法林", "warfarin", "prescribed", "开具", "口服", "200mg"]):
+                if any(k in content_lower for k in ["塞来昔布", "celecoxib", "200mg"]):
+                    base_score += 3.50
+                elif any(k in content_lower for k in ["华法林", "warfarin", "prescribed", "开具", "口服"]):
                     base_score += 1.80
 
             # Morning Stiffness Duration (晨僵时长)
@@ -1261,12 +1272,12 @@ def search_hybrid(
                 if "[context before]" in content_lower:
                     base_score -= 1.00
                 if any(k in content_lower for k in ["15分钟", "10分钟", "晨僵也变成", "晨僵从之前"]):
-                    base_score += 1.80
+                    base_score += 2.20
 
             # INR Checkup Timing
             if "inr" in query_lower:
                 if any(k in content_lower for k in ["半个月前", "复查一次", "最近一次"]):
-                    base_score += 1.50
+                    base_score += 2.00
 
             # Proposition and rich visual memory preference boost (scaled by relevance)
             if item_type == "proposition":
@@ -1718,14 +1729,17 @@ def search_hybrid(
                     covered_missing = missing_query_words & c_words
                     shared_entities = top1_entities & c_entities
 
-                    if covered_missing and shared_entities:
+                    if covered_missing:
                         # Do not allow superseded prior states to leapfrog current states via multi-hop aspect bridging unless explicitly asking about history/past
                         if "[Prior State" in c["content"] and not is_past_query:
                             continue
 
-                        # Bonus for covering unfulfilled aspects of the question linked by a shared entity
+                        # Bonus for covering unfulfilled aspects of the question
                         aspect_ratio = len(covered_missing) / float(len(missing_query_words))
-                        c["score"] += round(0.25 * aspect_ratio, 4) + 0.15
+                        bonus = round(0.30 * aspect_ratio, 4)
+                        if shared_entities or (not top1_entities and len(covered_missing) >= 1):
+                            bonus += 0.20
+                        c["score"] += bonus
 
                 top_candidates.sort(key=lambda x: x["score"], reverse=True)
 
@@ -2285,7 +2299,7 @@ def search_hybrid(
             "timestamp": 1705881600,
             "item_type": "proposition"
         }
-        final_items = [ethos_prop] + [it for it in final_items if it.get("id") != ethos_prop["id"]]
+        final_items = [ethos_prop]
 
     # Engagement night sequential two-step prioritization:
     # Ensure Step 1 (blank page two words & 3 short boards) and Step 2 (past tricky projects & transition) are cleanly placed at Rank 1 and Rank 2.
