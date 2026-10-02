@@ -141,25 +141,26 @@ def enrich_temporal_text(text: str, base_sec: Optional[float]) -> str:
 
 
 def strip_temporal_markers(text: str) -> str:
-    """Strip redundant bracketed temporal markers while strictly preserving conversation and event dates."""
+    """Clean redundant duplicated temporal markers while strictly preserving conversation dates, years, months, and relative time expressions."""
     if not text:
         return text
-    # Strip redundant [Event Year: ...], [Event Month: ...], [Relative Time: ...], [Year: ...], [Month: ...]
-    cleaned = re.sub(
-        r"\[(?:Event Year|Event Month|Relative Time|Year|Month):\s*[^\]]+\]",
-        "",
-        text
-    )
-    # If [Conversation Date: ...] or [Event Date: ...] is already present, strip redundant [Date: ...]
-    # Otherwise, normalize [Date: ...] to [Conversation Date: ...] so dates like "October 15, 2022" are retained
-    has_explicit_date = bool(re.search(r"\[(?:Conversation Date|Event Date):\s*[^\]]+\]", cleaned))
+    # Preserve explicit granularity markers: [Year: YYYY], [Month: MonthName], [Relative Time: ...]
+    # Clean up redundant nested or repeated Date markers
+    has_explicit_date = bool(re.search(r"\[(?:Conversation Date|Event Date):\s*[^\]]+\]", text))
     if has_explicit_date:
-        cleaned = re.sub(r"\[Date:\s*[^\]]+\]", "", cleaned)
+        cleaned = re.sub(r"\[Date:\s*[^\]]+\]", "", text)
     else:
-        cleaned = re.sub(r"\[Date:\s*([^\]]+)\]", r"[Conversation Date: \1]", cleaned)
+        cleaned = re.sub(r"\[Date:\s*([^\]]+)\]", r"[Conversation Date: \1]", text)
 
-    # Strip year-only and year-month tags like [2024年], [2024年5月], but retain exact day tags like [2024年5月10日]
-    cleaned = re.sub(r"\[\s*\d{4}年(?:\d{1,2}月)?\s*\]", "", cleaned)
+    # Deduplicate repeated identical tags
+    tags = re.findall(r"\[[^\]]+\]", cleaned)
+    seen_tags = set()
+    for t in tags:
+        if t in seen_tags:
+            cleaned = cleaned.replace(t, "", 1)
+        else:
+            seen_tags.add(t)
+
     # Clean up excess whitespace
     cleaned = re.sub(r"[ \t]+", " ", cleaned)
     cleaned = re.sub(r" +\n", "\n", cleaned)
