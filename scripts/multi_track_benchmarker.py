@@ -17,7 +17,7 @@ from typing import Dict, Any, Optional
 
 AML_BASE_URL = "https://agentmemoryleaderboard.ai"
 DEFAULT_KEY = "ldbd_sk_Wj20KAB5b3BMMf_qcpGHS2at-F7JlD7hqSX-qGTVma4"
-DEFAULT_VERSION = "version_268b35e9cfd4"
+DEFAULT_VERSION = "version_5c871987dfb1"
 HISTORY_FILE = "benchmark_runs_history.json"
 
 

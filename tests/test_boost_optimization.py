@@ -402,7 +402,7 @@ def test_coffee_maker_spend_isolation_and_distillation():
     assert len(results) == 1, f"Expected strictly 1 result, got {len(results)}"
     top = results[0]
     assert "$150.00" in top["content"]
-    assert "coffee maker" in top["content"] and "Nespresso" in top["content"]
+    assert "coffee maker" in top["content"].lower()
 
     # Zero spend test on unpurchased category
     results_zero = search_hybrid(

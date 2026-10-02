@@ -20,9 +20,51 @@ def parse_timestamp_seconds(ts: Optional[int]) -> Optional[float]:
     return t
 
 
-def enrich_temporal_text(text: str, base_sec: Optional[float]) -> str:
+def extract_ts_from_content(content: str) -> Optional[int]:
+    """Extract explicit timestamp in ms from message content or headers."""
+    if not isinstance(content, str):
+        return None
+    # 1. [Time: Sep 04, 2025, 09:16:04] or [Time: Sep 04, 2025]
+    m = re.search(r"\[Time:\s*([A-Za-z]{3}\s+\d{1,2},\s+\d{4}(?:,\s+\d{2}:\d{2}:\d{2})?)\]", content)
+    if m:
+        t_str = m.group(1)
+        for fmt in ("%b %d, %Y, %H:%M:%S", "%b %d, %Y"):
+            try:
+                dt = datetime.strptime(t_str, fmt).replace(tzinfo=timezone.utc)
+                return int(dt.timestamp() * 1000)
+            except ValueError:
+                pass
+    # 2. [Turn 1 - 2025-03-01T14:02:00Z] or [2025-03-01T14:02:00Z]
+    m = re.search(r"\[Turn\s+\d+\s*-\s*(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)\]", content)
+    if m:
+        try:
+            s = m.group(1).replace("Z", "+00:00")
+            dt = datetime.fromisoformat(s)
+            return int(dt.timestamp() * 1000)
+        except Exception:
+            pass
+    # 3. [Conversation Date: 2024-01-02] or [Event Date: 2024-01-02]
+    m = re.search(r"\[(?:Conversation Date|Event Date):\s*(\d{4}-\d{2}-\d{2})\]", content)
+    if m:
+        try:
+            dt = datetime.strptime(m.group(1), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            return int(dt.timestamp() * 1000)
+        except Exception:
+            pass
+    # 4. [Date: October 02, 2024]
+    m = re.search(r"\[Date:\s*([A-Za-z]+\s+\d{1,2},\s+\d{4})\]", content)
+    if m:
+        try:
+            dt = datetime.strptime(m.group(1), "%B %d, %Y").replace(tzinfo=timezone.utc)
+            return int(dt.timestamp() * 1000)
+        except Exception:
+            pass
+    return None
+
+
+def enrich_temporal_text(text: str, base_sec: Optional[float], has_real_ts: bool = True) -> str:
     """Enrich relative temporal references with explicit ISO and canonical dates (English & Chinese)."""
-    if not base_sec or not text:
+    if not base_sec or not text or not has_real_ts:
         return text
 
     try:
@@ -141,16 +183,22 @@ def enrich_temporal_text(text: str, base_sec: Optional[float]) -> str:
 
 
 def strip_temporal_markers(text: str) -> str:
-    """Clean redundant duplicated temporal markers while strictly preserving conversation dates, years, months, and relative time expressions."""
+    """Clean redundant duplicated temporal markers while strictly preserving conversation dates, event dates, years, months, and relative time expressions."""
     if not text:
         return text
-    # Preserve explicit granularity markers: [Year: YYYY], [Month: MonthName], [Relative Time: ...]
-    # Clean up redundant nested or repeated Date markers
+
     has_explicit_date = bool(re.search(r"\[(?:Conversation Date|Event Date):\s*[^\]]+\]", text))
     if has_explicit_date:
         cleaned = re.sub(r"\[Date:\s*[^\]]+\]", "", text)
+        cleaned = re.sub(r"\[Year:\s*[^\]]+\]", "", cleaned)
+        cleaned = re.sub(r"\[Month:\s*[^\]]+\]", "", cleaned)
+        cleaned = re.sub(r"\[\d{4}年\d{1,2}月(?:\d{1,2}日)?\]", "", cleaned)
     else:
         cleaned = re.sub(r"\[Date:\s*([^\]]+)\]", r"[Conversation Date: \1]", text)
+        if re.search(r"\[Conversation Date:\s*[^\]]+\]", cleaned):
+            cleaned = re.sub(r"\[Year:\s*[^\]]+\]", "", cleaned)
+            cleaned = re.sub(r"\[Month:\s*[^\]]+\]", "", cleaned)
+            cleaned = re.sub(r"\[\d{4}年\d{1,2}月(?:\d{1,2}日)?\]", "", cleaned)
 
     # Deduplicate repeated identical tags
     tags = re.findall(r"\[[^\]]+\]", cleaned)

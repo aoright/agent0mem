@@ -6256,5 +6256,1145 @@
       ],
       "media_transport": "inline_data_uri"
     }
+  },
+  {
+    "timestamp": "2026-10-03T02:37:17.602345",
+    "evaluation_id": "teval_fd23db6c720271c6",
+    "track": "textual",
+    "score_data": {
+      "score": 0.5510416666666667,
+      "completed": 46,
+      "total": 46,
+      "capabilities": [
+        {
+          "count": 5,
+          "id": "A",
+          "score": 0.4
+        },
+        {
+          "count": 3,
+          "id": "B",
+          "score": 0.3333333333333333
+        },
+        {
+          "count": 4,
+          "id": "C",
+          "score": 0.35
+        },
+        {
+          "count": 6,
+          "id": "D",
+          "score": 0.27499999999999997
+        },
+        {
+          "count": 2,
+          "id": "E",
+          "score": 1.0
+        },
+        {
+          "count": 4,
+          "id": "G",
+          "score": 0.85
+        },
+        {
+          "count": 2,
+          "id": "H",
+          "score": 0.5
+        },
+        {
+          "count": 28,
+          "id": "streaming",
+          "score": 0.5
+        }
+      ],
+      "subcapabilities": [
+        {
+          "capability_id": "A",
+          "count": 3,
+          "id": "A1",
+          "score": 0.3333333333333333
+        },
+        {
+          "capability_id": "A",
+          "count": 4,
+          "id": "A2",
+          "score": 0.5
+        },
+        {
+          "capability_id": "B",
+          "count": 1,
+          "id": "B1",
+          "score": 1.0
+        },
+        {
+          "capability_id": "B",
+          "count": 2,
+          "id": "B2",
+          "score": 0.0
+        },
+        {
+          "capability_id": "B",
+          "count": 1,
+          "id": "B4",
+          "score": 1.0
+        },
+        {
+          "capability_id": "C",
+          "count": 3,
+          "id": "C1",
+          "score": 0.13333333333333333
+        },
+        {
+          "capability_id": "C",
+          "count": 1,
+          "id": "C2",
+          "score": 0.4
+        },
+        {
+          "capability_id": "C",
+          "count": 1,
+          "id": "C3",
+          "score": 1.0
+        },
+        {
+          "capability_id": "D",
+          "count": 3,
+          "id": "D1",
+          "score": 0.08333333333333333
+        },
+        {
+          "capability_id": "D",
+          "count": 3,
+          "id": "D2",
+          "score": 0.5499999999999999
+        },
+        {
+          "capability_id": "E",
+          "count": 1,
+          "id": "E1",
+          "score": 1.0
+        },
+        {
+          "capability_id": "E",
+          "count": 1,
+          "id": "E2",
+          "score": 1.0
+        },
+        {
+          "capability_id": "E",
+          "count": 1,
+          "id": "E3",
+          "score": 1.0
+        },
+        {
+          "capability_id": "D",
+          "count": 1,
+          "id": "F1",
+          "score": 0.0
+        },
+        {
+          "capability_id": "G",
+          "count": 1,
+          "id": "G1",
+          "score": 1.0
+        },
+        {
+          "capability_id": "G",
+          "count": 1,
+          "id": "G2",
+          "score": 0.4
+        },
+        {
+          "capability_id": "G",
+          "count": 2,
+          "id": "G4",
+          "score": 1.0
+        },
+        {
+          "capability_id": "H",
+          "count": 2,
+          "id": "H2",
+          "score": 0.5
+        },
+        {
+          "capability_id": "streaming",
+          "count": 26,
+          "id": "streaming.online",
+          "score": 0.5
+        },
+        {
+          "capability_id": "streaming",
+          "count": 2,
+          "id": "streaming.intra_transfer",
+          "score": 0.5
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2026-10-03T02:45:41.308288",
+    "evaluation_id": "teval_d3732d524c7cf94f",
+    "track": "multimodal",
+    "score_data": {
+      "score": 0.6538461538461539,
+      "completed": 13,
+      "total": 13,
+      "capabilities": [
+        {
+          "count": 3,
+          "id": "retrieval",
+          "score": 0.5
+        },
+        {
+          "count": 1,
+          "id": "relational_reasoning",
+          "score": 0.0
+        },
+        {
+          "count": 9,
+          "id": "evidence_governance",
+          "score": 0.7777777777777778
+        }
+      ],
+      "subcapabilities": [
+        {
+          "capability_id": "retrieval",
+          "count": 1,
+          "id": "direct_recall",
+          "score": 0.0
+        },
+        {
+          "capability_id": "retrieval",
+          "count": 2,
+          "id": "atomic_retrieval",
+          "score": 0.75
+        },
+        {
+          "capability_id": "relational_reasoning",
+          "count": 1,
+          "id": "multi_session_reasoning",
+          "score": 0.0
+        },
+        {
+          "capability_id": "evidence_governance",
+          "count": 9,
+          "id": "abstention",
+          "score": 0.7777777777777778
+        }
+      ],
+      "media_transport": "inline_data_uri"
+    }
+  },
+  {
+    "timestamp": "2026-10-03T03:41:55.282080",
+    "evaluation_id": "teval_996de0a24b75a3fd",
+    "track": "textual",
+    "score_data": {
+      "score": 0.5264756944444444,
+      "completed": 46,
+      "total": 46,
+      "capabilities": [
+        {
+          "count": 5,
+          "id": "A",
+          "score": 0.4
+        },
+        {
+          "count": 3,
+          "id": "B",
+          "score": 0.3333333333333333
+        },
+        {
+          "count": 4,
+          "id": "C",
+          "score": 0.4
+        },
+        {
+          "count": 6,
+          "id": "D",
+          "score": 0.27499999999999997
+        },
+        {
+          "count": 2,
+          "id": "E",
+          "score": 1.0
+        },
+        {
+          "count": 4,
+          "id": "G",
+          "score": 0.6
+        },
+        {
+          "count": 2,
+          "id": "H",
+          "score": 0.5
+        },
+        {
+          "count": 28,
+          "id": "streaming",
+          "score": 0.6145833333333333
+        }
+      ],
+      "subcapabilities": [
+        {
+          "capability_id": "A",
+          "count": 3,
+          "id": "A1",
+          "score": 0.3333333333333333
+        },
+        {
+          "capability_id": "A",
+          "count": 4,
+          "id": "A2",
+          "score": 0.5
+        },
+        {
+          "capability_id": "B",
+          "count": 1,
+          "id": "B1",
+          "score": 1.0
+        },
+        {
+          "capability_id": "B",
+          "count": 2,
+          "id": "B2",
+          "score": 0.0
+        },
+        {
+          "capability_id": "B",
+          "count": 1,
+          "id": "B4",
+          "score": 1.0
+        },
+        {
+          "capability_id": "C",
+          "count": 3,
+          "id": "C1",
+          "score": 0.19999999999999998
+        },
+        {
+          "capability_id": "C",
+          "count": 1,
+          "id": "C2",
+          "score": 0.6
+        },
+        {
+          "capability_id": "C",
+          "count": 1,
+          "id": "C3",
+          "score": 1.0
+        },
+        {
+          "capability_id": "D",
+          "count": 3,
+          "id": "D1",
+          "score": 0.08333333333333333
+        },
+        {
+          "capability_id": "D",
+          "count": 3,
+          "id": "D2",
+          "score": 0.5499999999999999
+        },
+        {
+          "capability_id": "E",
+          "count": 1,
+          "id": "E1",
+          "score": 1.0
+        },
+        {
+          "capability_id": "E",
+          "count": 1,
+          "id": "E2",
+          "score": 1.0
+        },
+        {
+          "capability_id": "E",
+          "count": 1,
+          "id": "E3",
+          "score": 1.0
+        },
+        {
+          "capability_id": "D",
+          "count": 1,
+          "id": "F1",
+          "score": 0.0
+        },
+        {
+          "capability_id": "G",
+          "count": 1,
+          "id": "G1",
+          "score": 1.0
+        },
+        {
+          "capability_id": "G",
+          "count": 1,
+          "id": "G2",
+          "score": 0.4
+        },
+        {
+          "capability_id": "G",
+          "count": 2,
+          "id": "G4",
+          "score": 0.5
+        },
+        {
+          "capability_id": "H",
+          "count": 2,
+          "id": "H2",
+          "score": 0.5
+        },
+        {
+          "capability_id": "streaming",
+          "count": 26,
+          "id": "streaming.online",
+          "score": 0.6309523809523808
+        },
+        {
+          "capability_id": "streaming",
+          "count": 2,
+          "id": "streaming.intra_transfer",
+          "score": 0.5
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2026-10-03T03:45:42.849890",
+    "evaluation_id": "teval_1b761ecb9ae9ca8e",
+    "track": "multimodal",
+    "score_data": {
+      "score": 0.5769230769230769,
+      "completed": 13,
+      "total": 13,
+      "capabilities": [
+        {
+          "count": 3,
+          "id": "retrieval",
+          "score": 0.5
+        },
+        {
+          "count": 1,
+          "id": "relational_reasoning",
+          "score": 0.0
+        },
+        {
+          "count": 9,
+          "id": "evidence_governance",
+          "score": 0.6666666666666666
+        }
+      ],
+      "subcapabilities": [
+        {
+          "capability_id": "retrieval",
+          "count": 1,
+          "id": "direct_recall",
+          "score": 0.0
+        },
+        {
+          "capability_id": "retrieval",
+          "count": 2,
+          "id": "atomic_retrieval",
+          "score": 0.75
+        },
+        {
+          "capability_id": "relational_reasoning",
+          "count": 1,
+          "id": "multi_session_reasoning",
+          "score": 0.0
+        },
+        {
+          "capability_id": "evidence_governance",
+          "count": 9,
+          "id": "abstention",
+          "score": 0.6666666666666666
+        }
+      ],
+      "media_transport": "inline_data_uri"
+    }
+  },
+  {
+    "timestamp": "2026-10-03T04:42:09.335710",
+    "evaluation_id": "teval_78e83b2621e18b2e",
+    "track": "textual",
+    "score_data": {
+      "score": 0.5903067129629629,
+      "completed": 46,
+      "total": 46,
+      "capabilities": [
+        {
+          "count": 5,
+          "id": "A",
+          "score": 0.6
+        },
+        {
+          "count": 3,
+          "id": "B",
+          "score": 0.3333333333333333
+        },
+        {
+          "count": 4,
+          "id": "C",
+          "score": 0.5
+        },
+        {
+          "count": 6,
+          "id": "D",
+          "score": 0.26944444444444443
+        },
+        {
+          "count": 2,
+          "id": "E",
+          "score": 1.0
+        },
+        {
+          "count": 4,
+          "id": "G",
+          "score": 0.55
+        },
+        {
+          "count": 2,
+          "id": "H",
+          "score": 0.5833333333333334
+        },
+        {
+          "count": 28,
+          "id": "streaming",
+          "score": 0.59375
+        }
+      ],
+      "subcapabilities": [
+        {
+          "capability_id": "A",
+          "count": 3,
+          "id": "A1",
+          "score": 0.6666666666666666
+        },
+        {
+          "capability_id": "A",
+          "count": 4,
+          "id": "A2",
+          "score": 0.75
+        },
+        {
+          "capability_id": "B",
+          "count": 1,
+          "id": "B1",
+          "score": 1.0
+        },
+        {
+          "capability_id": "B",
+          "count": 2,
+          "id": "B2",
+          "score": 0.0
+        },
+        {
+          "capability_id": "B",
+          "count": 1,
+          "id": "B4",
+          "score": 1.0
+        },
+        {
+          "capability_id": "C",
+          "count": 3,
+          "id": "C1",
+          "score": 0.3333333333333333
+        },
+        {
+          "capability_id": "C",
+          "count": 1,
+          "id": "C2",
+          "score": 1.0
+        },
+        {
+          "capability_id": "C",
+          "count": 1,
+          "id": "C3",
+          "score": 1.0
+        },
+        {
+          "capability_id": "D",
+          "count": 3,
+          "id": "D1",
+          "score": 0.08333333333333333
+        },
+        {
+          "capability_id": "D",
+          "count": 3,
+          "id": "D2",
+          "score": 0.48333333333333334
+        },
+        {
+          "capability_id": "E",
+          "count": 1,
+          "id": "E1",
+          "score": 1.0
+        },
+        {
+          "capability_id": "E",
+          "count": 1,
+          "id": "E2",
+          "score": 1.0
+        },
+        {
+          "capability_id": "E",
+          "count": 1,
+          "id": "E3",
+          "score": 1.0
+        },
+        {
+          "capability_id": "D",
+          "count": 1,
+          "id": "F1",
+          "score": 0.16666666666666666
+        },
+        {
+          "capability_id": "G",
+          "count": 1,
+          "id": "G1",
+          "score": 1.0
+        },
+        {
+          "capability_id": "G",
+          "count": 1,
+          "id": "G2",
+          "score": 0.2
+        },
+        {
+          "capability_id": "G",
+          "count": 2,
+          "id": "G4",
+          "score": 0.5
+        },
+        {
+          "capability_id": "H",
+          "count": 2,
+          "id": "H2",
+          "score": 0.5833333333333334
+        },
+        {
+          "capability_id": "streaming",
+          "count": 26,
+          "id": "streaming.online",
+          "score": 0.6071428571428571
+        },
+        {
+          "capability_id": "streaming",
+          "count": 2,
+          "id": "streaming.intra_transfer",
+          "score": 0.5
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2026-10-03T04:45:46.710638",
+    "evaluation_id": "teval_5e83addca2eab5f9",
+    "track": "multimodal",
+    "score_data": {
+      "score": 0.6538461538461539,
+      "completed": 13,
+      "total": 13,
+      "capabilities": [
+        {
+          "count": 3,
+          "id": "retrieval",
+          "score": 0.5
+        },
+        {
+          "count": 1,
+          "id": "relational_reasoning",
+          "score": 0.0
+        },
+        {
+          "count": 9,
+          "id": "evidence_governance",
+          "score": 0.7777777777777778
+        }
+      ],
+      "subcapabilities": [
+        {
+          "capability_id": "retrieval",
+          "count": 1,
+          "id": "direct_recall",
+          "score": 0.0
+        },
+        {
+          "capability_id": "retrieval",
+          "count": 2,
+          "id": "atomic_retrieval",
+          "score": 0.75
+        },
+        {
+          "capability_id": "relational_reasoning",
+          "count": 1,
+          "id": "multi_session_reasoning",
+          "score": 0.0
+        },
+        {
+          "capability_id": "evidence_governance",
+          "count": 9,
+          "id": "abstention",
+          "score": 0.7777777777777778
+        }
+      ],
+      "media_transport": "inline_data_uri"
+    }
+  },
+  {
+    "timestamp": "2026-10-03T05:37:37.455964",
+    "evaluation_id": "teval_74a35a730a50d343",
+    "track": "textual",
+    "score_data": {
+      "score": 0.45772569444444444,
+      "completed": 46,
+      "total": 46,
+      "capabilities": [
+        {
+          "count": 5,
+          "id": "A",
+          "score": 0.4
+        },
+        {
+          "count": 3,
+          "id": "B",
+          "score": 0.3333333333333333
+        },
+        {
+          "count": 4,
+          "id": "C",
+          "score": 0.4
+        },
+        {
+          "count": 6,
+          "id": "D",
+          "score": 0.24166666666666667
+        },
+        {
+          "count": 2,
+          "id": "E",
+          "score": 1.0
+        },
+        {
+          "count": 4,
+          "id": "G",
+          "score": 0.3
+        },
+        {
+          "count": 2,
+          "id": "H",
+          "score": 0.5
+        },
+        {
+          "count": 28,
+          "id": "streaming",
+          "score": 0.53125
+        }
+      ],
+      "subcapabilities": [
+        {
+          "capability_id": "A",
+          "count": 3,
+          "id": "A1",
+          "score": 0.3333333333333333
+        },
+        {
+          "capability_id": "A",
+          "count": 4,
+          "id": "A2",
+          "score": 0.5
+        },
+        {
+          "capability_id": "B",
+          "count": 1,
+          "id": "B1",
+          "score": 1.0
+        },
+        {
+          "capability_id": "B",
+          "count": 2,
+          "id": "B2",
+          "score": 0.0
+        },
+        {
+          "capability_id": "B",
+          "count": 1,
+          "id": "B4",
+          "score": 1.0
+        },
+        {
+          "capability_id": "C",
+          "count": 3,
+          "id": "C1",
+          "score": 0.19999999999999998
+        },
+        {
+          "capability_id": "C",
+          "count": 1,
+          "id": "C2",
+          "score": 0.6
+        },
+        {
+          "capability_id": "C",
+          "count": 1,
+          "id": "C3",
+          "score": 1.0
+        },
+        {
+          "capability_id": "D",
+          "count": 3,
+          "id": "D1",
+          "score": 0.08333333333333333
+        },
+        {
+          "capability_id": "D",
+          "count": 3,
+          "id": "D2",
+          "score": 0.48333333333333334
+        },
+        {
+          "capability_id": "E",
+          "count": 1,
+          "id": "E1",
+          "score": 1.0
+        },
+        {
+          "capability_id": "E",
+          "count": 1,
+          "id": "E2",
+          "score": 1.0
+        },
+        {
+          "capability_id": "E",
+          "count": 1,
+          "id": "E3",
+          "score": 1.0
+        },
+        {
+          "capability_id": "D",
+          "count": 1,
+          "id": "F1",
+          "score": 0.0
+        },
+        {
+          "capability_id": "G",
+          "count": 1,
+          "id": "G1",
+          "score": 1.0
+        },
+        {
+          "capability_id": "G",
+          "count": 1,
+          "id": "G2",
+          "score": 0.2
+        },
+        {
+          "capability_id": "G",
+          "count": 2,
+          "id": "G4",
+          "score": 0.0
+        },
+        {
+          "capability_id": "H",
+          "count": 2,
+          "id": "H2",
+          "score": 0.5
+        },
+        {
+          "capability_id": "streaming",
+          "count": 26,
+          "id": "streaming.online",
+          "score": 0.5357142857142857
+        },
+        {
+          "capability_id": "streaming",
+          "count": 2,
+          "id": "streaming.intra_transfer",
+          "score": 0.5
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2026-10-03T05:45:41.885802",
+    "evaluation_id": "teval_b385c31888543d2d",
+    "track": "multimodal",
+    "score_data": {
+      "score": 0.8076923076923077,
+      "completed": 13,
+      "total": 13,
+      "capabilities": [
+        {
+          "count": 3,
+          "id": "retrieval",
+          "score": 0.5
+        },
+        {
+          "count": 1,
+          "id": "relational_reasoning",
+          "score": 0.0
+        },
+        {
+          "count": 9,
+          "id": "evidence_governance",
+          "score": 1.0
+        }
+      ],
+      "subcapabilities": [
+        {
+          "capability_id": "retrieval",
+          "count": 1,
+          "id": "direct_recall",
+          "score": 0.0
+        },
+        {
+          "capability_id": "retrieval",
+          "count": 2,
+          "id": "atomic_retrieval",
+          "score": 0.75
+        },
+        {
+          "capability_id": "relational_reasoning",
+          "count": 1,
+          "id": "multi_session_reasoning",
+          "score": 0.0
+        },
+        {
+          "capability_id": "evidence_governance",
+          "count": 9,
+          "id": "abstention",
+          "score": 1.0
+        }
+      ],
+      "media_transport": "inline_data_uri"
+    }
+  },
+  {
+    "timestamp": "2026-10-03T06:42:30.419813",
+    "evaluation_id": "teval_bd9a2f7368eddf5e",
+    "track": "textual",
+    "score_data": {
+      "score": 0.5274594907407408,
+      "completed": 46,
+      "total": 46,
+      "capabilities": [
+        {
+          "count": 5,
+          "id": "A",
+          "score": 0.4
+        },
+        {
+          "count": 3,
+          "id": "B",
+          "score": 0.3333333333333333
+        },
+        {
+          "count": 4,
+          "id": "C",
+          "score": 0.4
+        },
+        {
+          "count": 6,
+          "id": "D",
+          "score": 0.26944444444444443
+        },
+        {
+          "count": 2,
+          "id": "E",
+          "score": 1.0
+        },
+        {
+          "count": 4,
+          "id": "G",
+          "score": 0.55
+        },
+        {
+          "count": 2,
+          "id": "H",
+          "score": 0.5833333333333334
+        },
+        {
+          "count": 28,
+          "id": "streaming",
+          "score": 0.6354166666666667
+        }
+      ],
+      "subcapabilities": [
+        {
+          "capability_id": "A",
+          "count": 3,
+          "id": "A1",
+          "score": 0.3333333333333333
+        },
+        {
+          "capability_id": "A",
+          "count": 4,
+          "id": "A2",
+          "score": 0.5
+        },
+        {
+          "capability_id": "B",
+          "count": 1,
+          "id": "B1",
+          "score": 1.0
+        },
+        {
+          "capability_id": "B",
+          "count": 2,
+          "id": "B2",
+          "score": 0.0
+        },
+        {
+          "capability_id": "B",
+          "count": 1,
+          "id": "B4",
+          "score": 1.0
+        },
+        {
+          "capability_id": "C",
+          "count": 3,
+          "id": "C1",
+          "score": 0.19999999999999998
+        },
+        {
+          "capability_id": "C",
+          "count": 1,
+          "id": "C2",
+          "score": 0.6
+        },
+        {
+          "capability_id": "C",
+          "count": 1,
+          "id": "C3",
+          "score": 1.0
+        },
+        {
+          "capability_id": "D",
+          "count": 3,
+          "id": "D1",
+          "score": 0.08333333333333333
+        },
+        {
+          "capability_id": "D",
+          "count": 3,
+          "id": "D2",
+          "score": 0.48333333333333334
+        },
+        {
+          "capability_id": "E",
+          "count": 1,
+          "id": "E1",
+          "score": 1.0
+        },
+        {
+          "capability_id": "E",
+          "count": 1,
+          "id": "E2",
+          "score": 1.0
+        },
+        {
+          "capability_id": "E",
+          "count": 1,
+          "id": "E3",
+          "score": 1.0
+        },
+        {
+          "capability_id": "D",
+          "count": 1,
+          "id": "F1",
+          "score": 0.16666666666666666
+        },
+        {
+          "capability_id": "G",
+          "count": 1,
+          "id": "G1",
+          "score": 1.0
+        },
+        {
+          "capability_id": "G",
+          "count": 1,
+          "id": "G2",
+          "score": 0.2
+        },
+        {
+          "capability_id": "G",
+          "count": 2,
+          "id": "G4",
+          "score": 0.5
+        },
+        {
+          "capability_id": "H",
+          "count": 2,
+          "id": "H2",
+          "score": 0.5833333333333334
+        },
+        {
+          "capability_id": "streaming",
+          "count": 26,
+          "id": "streaming.online",
+          "score": 0.6547619047619049
+        },
+        {
+          "capability_id": "streaming",
+          "count": 2,
+          "id": "streaming.intra_transfer",
+          "score": 0.5
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2026-10-03T06:45:53.052070",
+    "evaluation_id": "teval_58acbe1617102f1a",
+    "track": "multimodal",
+    "score_data": {
+      "score": 0.8076923076923077,
+      "completed": 13,
+      "total": 13,
+      "capabilities": [
+        {
+          "count": 3,
+          "id": "retrieval",
+          "score": 0.5
+        },
+        {
+          "count": 1,
+          "id": "relational_reasoning",
+          "score": 0.0
+        },
+        {
+          "count": 9,
+          "id": "evidence_governance",
+          "score": 1.0
+        }
+      ],
+      "subcapabilities": [
+        {
+          "capability_id": "retrieval",
+          "count": 1,
+          "id": "direct_recall",
+          "score": 0.0
+        },
+        {
+          "capability_id": "retrieval",
+          "count": 2,
+          "id": "atomic_retrieval",
+          "score": 0.75
+        },
+        {
+          "capability_id": "relational_reasoning",
+          "count": 1,
+          "id": "multi_session_reasoning",
+          "score": 0.0
+        },
+        {
+          "capability_id": "evidence_governance",
+          "count": 9,
+          "id": "abstention",
+          "score": 1.0
+        }
+      ],
+      "media_transport": "inline_data_uri"
+    }
   }
 ]
