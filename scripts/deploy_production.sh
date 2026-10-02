@@ -4,7 +4,7 @@ set -euo pipefail
 SSH_KEY="/Users/liuyukai/CREATE/PandaAI/nunu/admin_key"
 REMOTE_HOST="root@47.97.127.223"
 
-echo "[1/5] Executing mandatory pre-deploy SQLite hot snapshot..."
+echo "[1/6] Executing mandatory pre-deploy SQLite hot snapshot..."
 ssh -o StrictHostKeyChecking=no -i "${SSH_KEY}" "${REMOTE_HOST}" '
   mkdir -p /var/lib/agent0mem/backups
   TS=$(date +%Y%m%d_%H%M%S)
@@ -19,7 +19,22 @@ ssh -o StrictHostKeyChecking=no -i "${SSH_KEY}" "${REMOTE_HOST}" '
   ls -lh "${SNAPSHOT_DB}"
 '
 
-echo "[2/5] Syncing application code to /opt/agent0mem/app/ with strict state protection filters..."
+echo "[2/6] Detecting active blue/green upstream service..."
+ACTIVE_PORT=$(ssh -o StrictHostKeyChecking=no -i "${SSH_KEY}" "${REMOTE_HOST}" "grep -o 'http://127.0.0.1:828[89]/' /etc/nginx/conf.d/architect-exam.conf | grep -o '828[89]' | head -n1")
+if [ "${ACTIVE_PORT}" = "8289" ]; then
+  TARGET_PORT="8288"
+  TARGET_SERVICE="agent0mem"
+  DRAIN_PORT="8289"
+  DRAIN_SERVICE="agent0mem-v2"
+else
+  TARGET_PORT="8289"
+  TARGET_SERVICE="agent0mem-v2"
+  DRAIN_PORT="8288"
+  DRAIN_SERVICE="agent0mem"
+fi
+echo "Active upstream is :${ACTIVE_PORT} (${DRAIN_SERVICE}). Staging deployment on :${TARGET_PORT} (${TARGET_SERVICE})."
+
+echo "[3/6] Syncing application code to /opt/agent0mem/app/ with strict state protection filters..."
 rsync -avz \
   --filter=":- /Users/liuyukai/CREATE/agent0mem/.gitignore" \
   --filter="protect *.db" \
@@ -36,25 +51,32 @@ rsync -avz \
   /Users/liuyukai/CREATE/agent0mem/app/ \
   "${REMOTE_HOST}:/opt/agent0mem/app/"
 
-echo "[3/5] Starting agent0mem-v2 on port 8289 with zero-downtime protection..."
-ssh -o StrictHostKeyChecking=no -i "${SSH_KEY}" "${REMOTE_HOST}" '
-  systemctl restart agent0mem-v2
+echo "[4/6] Restarting staging service ${TARGET_SERVICE} on port ${TARGET_PORT}..."
+ssh -o StrictHostKeyChecking=no -i "${SSH_KEY}" "${REMOTE_HOST}" "
+  systemctl restart ${TARGET_SERVICE}
   sleep 2
-  systemctl is-active agent0mem-v2
-  curl -s http://127.0.0.1:8289/health
-'
+  systemctl is-active ${TARGET_SERVICE}
+  curl -s http://127.0.0.1:${TARGET_PORT}/health
+"
 
-echo "[4/5] Gracefully switching nginx to agent0mem-v2..."
-ssh -o StrictHostKeyChecking=no -i "${SSH_KEY}" "${REMOTE_HOST}" '
-  sed -i "s|proxy_pass http://127.0.0.1:8288/;|proxy_pass http://127.0.0.1:8289/;|g" /etc/nginx/conf.d/architect-exam.conf
+echo "[5/6] Gracefully switching nginx to ${TARGET_SERVICE} on port ${TARGET_PORT}..."
+ssh -o StrictHostKeyChecking=no -i "${SSH_KEY}" "${REMOTE_HOST}" "
+  sed -i 's|proxy_pass http://127.0.0.1:${ACTIVE_PORT}/;|proxy_pass http://127.0.0.1:${TARGET_PORT}/;|g' /etc/nginx/conf.d/architect-exam.conf
   nginx -t
   nginx -s reload
-'
+"
 
-echo "[5/5] Verifying production public endpoint health..."
-ssh -o StrictHostKeyChecking=no -i "${SSH_KEY}" "${REMOTE_HOST}" '
+echo "[6/6] Verifying public endpoint and syncing drain service ${DRAIN_SERVICE}..."
+ssh -o StrictHostKeyChecking=no -i "${SSH_KEY}" "${REMOTE_HOST}" "
   curl -s http://47.97.127.223/agent0mem/health
-'
+  echo ''
+  echo 'Draining in-flight requests on ${DRAIN_SERVICE} (3s)...'
+  sleep 3
+  systemctl restart ${DRAIN_SERVICE}
+  sleep 2
+  systemctl is-active ${DRAIN_SERVICE}
+  curl -s http://127.0.0.1:${DRAIN_PORT}/health
+"
 
 echo ""
-echo "Zero-downtime blue/green deployment and verification completed successfully."
+echo "Zero-downtime blue/green deployment and dual-service synchronization completed successfully."
