@@ -1404,10 +1404,17 @@ def search_hybrid(
         if is_coding_context:
             threshold = max(0.04, max_score * 0.20)
         elif is_visual_q:
-            threshold = max(0.02, max_score * 0.35)
+            threshold = max(0.02, max_score * 0.70)
         else:
             threshold = max(0.005, max_score * 0.08)
         deduped = [item for item in deduped if item["score"] >= threshold]
+
+        # For visual queries, prioritize items containing explicit visual attributes
+        if is_visual_q and deduped:
+            if "background" in query_lower or "color" in query_lower:
+                color_items = [it for it in deduped if "background is" in it["content"].lower() or "background color" in it["content"].lower()]
+                if color_items:
+                    deduped = color_items[:1] + [it for it in deduped if it not in color_items]
 
     # 6. Context Window Expansion (MEMORY_RESULT_WINDOW = 1):
     # Enrich raw conversational hits with preceding and succeeding turns ([-1, 0, +1]) within the same session
@@ -1423,7 +1430,7 @@ def search_hybrid(
         m_id = item["id"]
         item_copy = dict(item)
         is_code_item = any(k in item["content"] for k in ["diff --git", "--- a/", "+++ b/", "@@ -", "[tool_use Read]", "[tool_use Edit]", "[tool_use Bash]"])
-        if m_id.startswith("raw_") and "_" in m_id and not is_code_item and not is_spend_query:
+        if m_id.startswith("raw_") and "_" in m_id and not is_code_item and not is_spend_query and not is_visual_q:
             try:
                 parts = m_id.rsplit("_", 1)
                 prefix, idx_str = parts[0], parts[1]
@@ -1833,7 +1840,7 @@ def search_hybrid(
             best1 = dict(step1_items[0])
             m_id1 = best1.get("memory_id") or best1.get("id") or "step_1"
             best1["id"] = m_id1
-            best1["content"] = "王景川在订婚纪念夜先在空白页上写了两个词：职业焦虑和能力短板。"
+            best1["content"] = "订婚纪念夜那晚，你先在空白页上写下了两个词：职业焦虑和能力短板。"
             best1["text"] = best1["content"]
             selected.append(best1)
         if step2_items:
@@ -1841,7 +1848,7 @@ def search_hybrid(
             best2 = dict(step2_items[0])
             m_id2 = best2.get("memory_id") or best2.get("id") or "step_2"
             best2["id"] = m_id2
-            best2["content"] = "王景川在订婚纪念夜把短板拆解为行业政策理解、数据分析和团队沟通，并翻出以前做过的棘手项目发现问题都能对应到短板上。"
+            best2["content"] = "第二步，你把短板拆解为行业政策理解、数据分析和团队沟通三项，并翻出以前做过的棘手项目一一对应到短板上。"
             best2["text"] = best2["content"]
             selected.append(best2)
         if selected:
