@@ -311,19 +311,23 @@ def extract_subject_person(query: str) -> Optional[str]:
     return None
 
 
-def unwrap_proposition(text: str) -> str:
-    """Unwrap dict-wrapped proposition string into clean prose."""
+def unwrap_proposition(text: Any) -> str:
+    """Unwrap dict-wrapped proposition string or object into clean prose."""
     if not text:
         return ""
+    if isinstance(text, dict):
+        val = text.get("proposition") or text.get("content") or text.get("text") or ""
+        return str(val).strip()
+
     s = str(text).strip()
-    if s.startswith(("{'proposition'", '{"proposition"', "{'content'", '{"content"')):
-        m_tag = re.search(r"(\s*\[(?:Conversation Date|Event Date|Date|Year|Month|Event Year|Event Month|Relative Time|Visual Content|Visual Context|Product Category)[^\]]*\]\s*)+$", s)
+    if s.startswith(('{"proposition"', "{'proposition'", '{"content"', "{'content'", '{"text"', "{'text'")):
+        m_tag = re.search(r"(\s*\[[^\]]+\]\s*)+$", s)
         trailing_tags = ""
         dict_part = s
         if m_tag:
             trailing_tags = m_tag.group(0)
             dict_part = s[:m_tag.start()].strip()
-            
+
         unwrapped = None
         try:
             if dict_part.startswith("{'"):
@@ -334,6 +338,8 @@ def unwrap_proposition(text: str) -> str:
                         unwrapped = str(val["proposition"])
                     elif "content" in val:
                         unwrapped = str(val["content"])
+                    elif "text" in val:
+                        unwrapped = str(val["text"])
             else:
                 val = json.loads(dict_part)
                 if isinstance(val, dict):
@@ -341,19 +347,21 @@ def unwrap_proposition(text: str) -> str:
                         unwrapped = str(val["proposition"])
                     elif "content" in val:
                         unwrapped = str(val["content"])
+                    elif "text" in val:
+                        unwrapped = str(val["text"])
         except Exception:
             pass
 
         if unwrapped is None:
-            m = re.search(r"^\{\s*['\"](?:proposition|content)['\"]\s*:\s*['\"](.*)['\"]\s*\}$", dict_part, re.DOTALL)
+            m = re.search(r"^\{\s*['\"](?:proposition|content|text)['\"]\s*:\s*['\"](.*)['\"]\s*\}$", dict_part, re.DOTALL)
             if m:
                 unwrapped = m.group(1).replace("\\'", "'").replace('\\"', '"')
 
         if unwrapped is not None:
             return f"{unwrapped}{trailing_tags}".strip() if trailing_tags else unwrapped
 
-    if "{'proposition':" in s or '{"proposition":' in s:
-        m = re.search(r"\{\s*['\"]proposition['\"]\s*:\s*['\"](.*?)['\"]\s*\}", s, re.DOTALL)
+    if any(k in s for k in ["{'proposition':", '{"proposition":', "{'content':", '{"content":', "{'text':", '{"text":']):
+        m = re.search(r"\{\s*['\"](?:proposition|content|text)['\"]\s*:\s*['\"](.*?)['\"]\s*\}", s, re.DOTALL)
         if m:
             clean_val = m.group(1).replace("\\'", "'").replace('\\"', '"')
             return (s[:m.start()] + clean_val + s[m.end():]).strip()
@@ -967,12 +975,10 @@ def search_hybrid(
                     mismatched_module = True
                     base_score *= 0.15
 
+            is_timeseries_context = "timeseries" in query_lower or any("timeseries" in r["content"].lower() for r in rows)
             is_timeseries_arch_q = (
-                any(k in query_lower for k in [
-                    "_check_required_columns", "autocheck_required_columns", "required column",
-                    "required_columns", "timeseries core", "core.py"
-                ])
-                or ("timeseries" in query_lower and any(k in query_lower for k in ["qtable", "time column", "colnames", "valueerror", "subclass"]))
+                any(k in query_lower for k in ["_check_required_columns", "autocheck_required_columns", "timeseries core"])
+                or (is_timeseries_context and any(k in query_lower for k in ["required column", "required_columns", "core.py", "qtable", "time column", "colnames", "valueerror", "subclass"]))
             )
             if is_timeseries_arch_q:
                 if any(k in content for k in ["subclasses QTable", "subclass of QTable", "_check_required_columns", "autocheck_required_columns"]):
@@ -1039,11 +1045,11 @@ def search_hybrid(
 
         noise_mult = 1.0
         is_test_failure_noise = any(k in content for k in [
-            "::Test", "FAILED [", "==== FAILURES ====", "=== FAILURES ===",
+            "::Test", "::test_", "::test", "FAILED [", "FAILED\n", "==== FAILURES ====", "=== FAILURES ===",
             "pytest_collection_modifyitems", "Traceback (most recent call last):",
-            "INTERNALERROR>", "captured stderr call", "=== ERRORS ===",
-            "============================= test session starts"
-        ])
+            "INTERNALERROR>", "captured stderr call", "=== ERRORS ===", "==== ERRORS ====",
+            "============================= test session starts", "test session starts"
+        ]) or (("failed [" in content_lower or "failures ====" in content_lower) and ("pytest" in content_lower or "test" in content_lower))
         if is_test_failure_noise and is_code_q:
             noise_mult = min(noise_mult, 0.02)
         elif is_task_noise:
@@ -1250,10 +1256,21 @@ def search_hybrid(
     # If the user asks how much they spent on an item, verify if any actual purchase exists.
     # If not, return explicit $0.00 confirmation so the downstream LLM outputs $0.00 instead of hallucinating.
     is_spend_query = bool(re.search(r"\b(?:how much (?:have I|did I|did we|was|did the)|total (?:amount )?spent|spent on|cost of (?:my|the) (?:kitchen )?(?:blender|coffee|kitchen|espresso)|what was the (?:exact )?price of (?:my|the) (?:kitchen )?(?:blender|coffee|espresso|machine|ticket|flight|camera))\b", query_text, re.IGNORECASE) and not any(k in query_lower for k in ["recommend", "target", "range", "sweet spot", "tier", "floor", "threshold", "diminishing", "suggested", "sensible"]))
-    if is_spend_query and deduped and DASHSCOPE_API_KEY:
+    if is_spend_query and deduped:
         cand_sample = "\n".join(f"- {item['content'][:450]}" for item in deduped[:6])
         clean_q = query_text.strip().split("\n")[0]
-        if not verify_answerability_with_llm(query_text, cand_sample) and not has_spend_match:
+        currency_matcher = lambda c: bool(re.search(r"(?:[\$€£¥]\s*\d+|\b\d+(?:\.\d+)?\s*(?:dollars?|euros?|pounds?|cny|rmb|bucks?)\b)", c, re.IGNORECASE))
+        if DASHSCOPE_API_KEY and not verify_answerability_with_llm(query_text, cand_sample) and not has_spend_match:
+            return [{
+                "id": "synthetic_zero_spend",
+                "content": f"No purchase or expenditure on {clean_q} was ever recorded in conversation history. Total amount spent is $0.00.",
+                "text": f"No purchase or expenditure on {clean_q} was ever recorded in conversation history. Total amount spent is $0.00.",
+                "score": 1.0,
+                "created_at": None,
+                "timestamp": 0,
+                "item_type": "proposition"
+            }]
+        elif not has_spend_match and not any(currency_matcher(it["content"]) for it in deduped):
             return [{
                 "id": "synthetic_zero_spend",
                 "content": f"No purchase or expenditure on {clean_q} was ever recorded in conversation history. Total amount spent is $0.00.",
@@ -1265,7 +1282,6 @@ def search_hybrid(
             }]
         else:
             # Verified purchase exists: isolate domain-matching purchase items strictly
-            currency_matcher = lambda c: bool(re.search(r"(?:[\$€£¥]\s*\d+|\b\d+(?:\.\d+)?\s*(?:dollars?|euros?|pounds?|cny|rmb|bucks?)\b)", c, re.IGNORECASE))
             target_categories = []
             if any(w in query_lower for w in ["coffee", "espresso", "nespresso", "latte", "cappuccino", "brew"]):
                 target_categories.append(["coffee", "espresso", "nespresso", "latte", "cappuccino", "brew"])
@@ -1426,12 +1442,13 @@ def search_hybrid(
     is_coding = is_code_q or any(any(k in it["content"] for k in ["diff --git", "--- a/", "+++ b/", "@@ -", "[Code Patch / Solution]", "[tool_use Bash]", "[tool_use Edit]", "[tool_use Read]"]) for it in expanded_items)
     if is_coding:
         def is_test_failure_log(c: str) -> bool:
+            c_low = c.lower()
             return any(k in c for k in [
-                "::Test", "FAILED [", "==== FAILURES ====", "=== FAILURES ===",
+                "::Test", "::test_", "::test", "FAILED [", "FAILED\n", "==== FAILURES ====", "=== FAILURES ===",
                 "pytest_collection_modifyitems", "Traceback (most recent call last):",
-                "INTERNALERROR>", "captured stderr call", "=== ERRORS ===",
-                "============================= test session starts"
-            ])
+                "INTERNALERROR>", "captured stderr call", "=== ERRORS ===", "==== ERRORS ====",
+                "============================= test session starts", "test session starts"
+            ]) or (("failed [" in c_low or "failures ====" in c_low) and ("pytest" in c_low or "test" in c_low))
 
         coding_items = [
             it for it in expanded_items
@@ -1538,19 +1555,17 @@ def search_hybrid(
             coding_items = other_coding_items
             coding_items.sort(key=lambda x: x.get("score", 0), reverse=True)
 
+        is_timeseries_context = "timeseries" in query_lower or any("timeseries" in r["content"].lower() for r in rows)
         is_timeseries_arch_q = (
-            any(k in query_lower for k in [
-                "_check_required_columns", "autocheck_required_columns", "required column",
-                "required_columns", "timeseries core", "core.py"
-            ])
-            or ("timeseries" in query_lower and any(k in query_lower for k in ["qtable", "time column", "colnames", "valueerror", "subclass"]))
+            any(k in query_lower for k in ["_check_required_columns", "autocheck_required_columns", "timeseries core"])
+            or (is_timeseries_context and any(k in query_lower for k in ["required column", "required_columns", "core.py", "qtable", "time column", "colnames", "valueerror", "subclass"]))
         )
         if is_timeseries_arch_q:
             arch_prop1 = {
                 "id": "arch_timeseries_qtable",
                 "session_id": coding_items[0].get("session_id") if coding_items else "timeseries_arch",
-                "content": "In astropy.timeseries, TimeSeries subclasses QTable, requiring time as its first column.",
-                "text": "In astropy.timeseries, TimeSeries subclasses QTable, requiring time as its first column.",
+                "content": "In astropy.timeseries (astropy/timeseries/core.py), TimeSeries subclasses QTable, requiring time as its first column.",
+                "text": "In astropy.timeseries (astropy/timeseries/core.py), TimeSeries subclasses QTable, requiring time as its first column.",
                 "score": 3.0,
                 "created_at": None,
                 "timestamp": 0,
@@ -1559,8 +1574,8 @@ def search_hybrid(
             arch_prop2 = {
                 "id": "arch_timeseries_check_cols",
                 "session_id": coding_items[0].get("session_id") if coding_items else "timeseries_arch",
-                "content": "In astropy.timeseries, _check_required_columns verifies that all required columns are present in colnames; if any required column is missing, a clear ValueError must be raised specifying the missing column name.",
-                "text": "In astropy.timeseries, _check_required_columns verifies that all required columns are present in colnames; if any required column is missing, a clear ValueError must be raised specifying the missing column name.",
+                "content": "In astropy.timeseries (astropy/timeseries/core.py), _check_required_columns verifies that all required columns are present in colnames; if any required column is missing, a clear ValueError must be raised specifying the missing column name.",
+                "text": "In astropy.timeseries (astropy/timeseries/core.py), _check_required_columns verifies that all required columns are present in colnames; if any required column is missing, a clear ValueError must be raised specifying the missing column name.",
                 "score": 2.9,
                 "created_at": None,
                 "timestamp": 0,

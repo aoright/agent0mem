@@ -327,6 +327,18 @@ def test_unwrap_proposition_cleanliness():
     c4 = "Plain clean string"
     assert unwrap_proposition(c4) == "Plain clean string"
 
+    c5 = "{'content': '王景川在空白页写字'} [2024年5月10日]"
+    assert unwrap_proposition(c5) == "王景川在空白页写字 [2024年5月10日]"
+
+    c6 = "{'text': 'Some text'} [Event Date: 2023-01-01]"
+    assert unwrap_proposition(c6) == "Some text [Event Date: 2023-01-01]"
+
+    c7 = {"proposition": "A raw dictionary"}
+    assert unwrap_proposition(c7) == "A raw dictionary"
+
+    c8 = "{'proposition': 'It\\'s a test with quotes'}"
+    assert unwrap_proposition(c8) == "It's a test with quotes"
+
 
 def test_engagement_strictly_two_steps():
     """Verify that engagement night query returns strictly 2 steps and discards all trailing dialogue."""
