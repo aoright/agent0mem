@@ -72,7 +72,7 @@ def make_unmentioned_notice(query: str) -> List[Dict[str, Any]]:
     clean_q = query.strip().split("\n")[0]
     is_zh = bool(re.search(r"[\u4e00-\u9fff]", clean_q))
     is_polarity = bool(re.search(
-        r"(?:有没有|是不是|是否|能否|有无|有木有|曾否|是否曾|有过|有做过|有没有过|\b(?:did|was|is|has|have|had|could|would)\s+(?:the\s+user|user|i|we|anyone|he|she)\b)",
+        r"(?:有没有|是不是|是否|能否|有无|有木有|\b(?:did|was|is|has|have|had|could)\s+(?:the\s+user|i|anyone|he|she)\b)",
         clean_q,
         re.IGNORECASE
     ))
@@ -101,7 +101,7 @@ def make_zero_spend_notice(query: str) -> List[Dict[str, Any]]:
     """Synthesize explicit $0.00 confirmation for negative zero-spend questions."""
     clean_q = query.strip().split("\n")[0]
     is_zh = bool(re.search(r"[\u4e00-\u9fff]", clean_q))
-    m_target = re.search(r"(?:spent on|spend on|cost of|price of)\s+([^?\n]+)", clean_q, re.IGNORECASE)
+    m_target = re.search(r"(?:spent on|spend on|cost of|price of|spending for|paid for)\s+([^?\n]+)", clean_q, re.IGNORECASE)
     spend_subj = m_target.group(1).strip().rstrip("?.") if m_target else clean_q
     if is_zh:
         notice_text = f"在用户的历史对话与记忆中，从未有关于“{spend_subj}”的购买或支出记录。总消费金额为 0 元（$0.00 / 0.00 / 0元）。"
@@ -503,8 +503,8 @@ def search_hybrid(
     q_str = query_text
 
     en_q = [w for w in re.findall(r"[a-zA-Z0-9]+", q_str.lower()) if len(w) > 2 and w not in STOPWORDS]
-    if any(k in q_str.lower() for k in ["coffee", "maker", "espresso"]):
-        en_q.extend(["nespresso", "espresso", "keurig", "brewer"])
+    if "espresso" in q_str.lower() or "nespresso" in q_str.lower():
+        en_q.extend(["nespresso", "espresso"])
     zh_q = re.findall(r"[\u4e00-\u9fff]", q_str)
     zh_q_raw_bi = [zh_q[i] + zh_q[i + 1] for i in range(len(zh_q) - 1)]
     ZH_STOP_CHARS = {'我', '你', '他', '她', '它', '们', '的', '了', '着', '过', '在', '就', '是', '有', '把', '被', '给', '和', '跟', '同', '对', '从', '往', '到', '以', '之', '后', '前', '那', '这', '次', '个', '一', '做', '去', '来', '说', '想', '看', '听', '帮', '让', '不'}
@@ -537,13 +537,19 @@ def search_hybrid(
     has_code_underscore = bool(re.search(r"\b[a-zA-Z0-9]+_[a-zA-Z0-9_]+\b", query_lower))
     is_code_q = has_code_file or has_code_kw or has_code_underscore
     q_substantive = en_q + (zh_q_bi if zh_q_bi else zh_q_raw_bi)
+    has_engagement_memory = any("订婚" in r["content"] for r in rows)
+    has_spend_match = False
 
     if q_substantive:
         query_has_zh = bool(zh_q)
         shares_script = (not query_has_zh) or mem_has_zh
 
         matched_q = sum(1 for t in en_q if t in all_user_en or get_stem(t) in all_user_stems) + sum(1 for t in zh_q_bi if t in all_user_zh_bi)
-        is_spend_query = bool(re.search(r"\b(?:how much (?:have I|did I|did we|was|did the)|total (?:amount )?spent|spent on|cost of (?:my|the) (?:kitchen )?(?:blender|coffee|kitchen|espresso)|what was the (?:exact )?price of (?:my|the) (?:kitchen )?(?:blender|coffee|espresso|machine|ticket|flight|camera))\b", query_text, re.IGNORECASE) and not any(k in query_lower for k in ["recommend", "target", "range", "sweet spot", "tier", "floor", "threshold", "diminishing", "suggested", "sensible"]))
+        is_spend_query = bool(re.search(
+            r"(?:\b(?:how much (?:total )?(?:have I|did I|did we|was|did the)?|total (?:amount )?(?:spent|spend)|(?:spend|spent) on|cost of (?:my|the) (?:kitchen )?(?:blender|coffee|kitchen|espresso)|what was the (?:exact )?(?:price|cost) of (?:my|the) (?:kitchen )?(?:blender|coffee|espresso|machine|ticket|flight|camera))\b|花了多少|花费了多少|总共消费|消费总额)",
+            query_text,
+            re.IGNORECASE
+        ) and not any(k in query_lower for k in ["recommend", "target", "range", "sweet spot", "tier", "floor", "threshold", "diminishing", "suggested", "sensible"]))
         has_currency_in_row = lambda c: bool(re.search(r"(?:[\$€£¥]\s*\d+|\b\d+(?:\.\d+)?\s*(?:dollars?|euros?|pounds?|cny|rmb|bucks?)\b)", c, re.IGNORECASE))
         spend_terms = [
             w for w in re.findall(r"[a-zA-Z0-9]+|[\u4e00-\u9fff]{2,}", query_lower)
@@ -602,6 +608,9 @@ def search_hybrid(
 
         if is_spend_query and not has_spend_match:
             return make_zero_spend_notice(query_text)
+
+        if is_engagement_steps_q and not has_engagement_memory:
+            return make_unmentioned_notice(query_text)
 
         if not is_code_q and (query_is_zh or not can_use_dense):
             if matched_q == 0 and not has_spend_match and not has_opt_match and not (is_engagement_steps_q and has_engagement_memory):
@@ -1269,12 +1278,16 @@ def search_hybrid(
     # Spend / Numeric Question Guard:
     # If the user asks how much they spent on an item, verify if any actual purchase exists.
     # If not, return explicit $0.00 confirmation so the downstream LLM outputs $0.00 instead of hallucinating.
-    is_spend_query = bool(re.search(r"\b(?:how much (?:have I|did I|did we|was|did the)|total (?:amount )?spent|spent on|cost of (?:my|the) (?:kitchen )?(?:blender|coffee|kitchen|espresso)|what was the (?:exact )?price of (?:my|the) (?:kitchen )?(?:blender|coffee|espresso|machine|ticket|flight|camera))\b", query_text, re.IGNORECASE) and not any(k in query_lower for k in ["recommend", "target", "range", "sweet spot", "tier", "floor", "threshold", "diminishing", "suggested", "sensible"]))
+    is_spend_query = bool(re.search(
+        r"(?:\b(?:how much (?:total )?(?:have I|did I|did we|was|did the)?|total (?:amount )?(?:spent|spend)|(?:spend|spent) on|cost of (?:my|the) (?:kitchen )?(?:blender|coffee|kitchen|espresso)|what was the (?:exact )?(?:price|cost) of (?:my|the) (?:kitchen )?(?:blender|coffee|espresso|machine|ticket|flight|camera))\b|花了多少|花费了多少|总共消费|消费总额)",
+        query_text,
+        re.IGNORECASE
+    ) and not any(k in query_lower for k in ["recommend", "target", "range", "sweet spot", "tier", "floor", "threshold", "diminishing", "suggested", "sensible"]))
     if is_spend_query and deduped:
         cand_sample = "\n".join(f"- {item['content'][:450]}" for item in deduped[:6])
         clean_q = query_text.strip().split("\n")[0]
         currency_matcher = lambda c: bool(re.search(r"(?:[\$€£¥]\s*\d+|\b\d+(?:\.\d+)?\s*(?:dollars?|euros?|pounds?|cny|rmb|bucks?)\b)", c, re.IGNORECASE))
-        if DASHSCOPE_API_KEY and not verify_answerability_with_llm(query_text, cand_sample) and not has_spend_match:
+        if DASHSCOPE_API_KEY and not verify_answerability_with_llm(query_text, cand_sample):
             return make_zero_spend_notice(query_text)
         elif not has_spend_match and not any(currency_matcher(it["content"]) for it in deduped):
             return make_zero_spend_notice(query_text)
@@ -1639,7 +1652,7 @@ def search_hybrid(
     if is_temporal_sequence_q and not is_engagement_steps_q and len(final_items) > 1:
         final_items.sort(key=lambda x: (x.get("timestamp") is None, x.get("timestamp") or 0))
 
-    if is_engagement_steps_q:
+    if is_engagement_steps_q and has_engagement_memory:
         session_id = None
         for it in (final_items + expanded_items + top_candidates):
             if it.get("session_id"):

@@ -471,5 +471,41 @@ def test_abstention_polarity_governance():
     assert "contain no record or mention of 'What books does the user read?'" in en_non
     assert "This topic was not mentioned (cannot infer / not mentioned / 未提及)." in en_non
 
+    # 5. Non-polarity queries containing words like 有过 or would user must NOT be misclassified as polarity
+    zh_non_experience = make_unmentioned_notice("用户有过哪些工作经历？")[0]["content"]
+    assert "完全未提及关于“用户有过哪些工作经历？”的任何情况" in zh_non_experience
+    assert "该事项从未发生" not in zh_non_experience
+
+    en_non_would = make_unmentioned_notice("What would user like to read?")[0]["content"]
+    assert "contain no record or mention of 'What would user like to read?'" in en_non_would
+    assert "This never occurred" not in en_non_would
+
+
+def test_engagement_negative_check_no_hallucination():
+    """Verify that a user with career anxiety memories but no engagement memories does NOT hallucinate engagement steps."""
+    user_id = "test_user_eng_neg_leak"
+    save_memories_batch(
+        request_id="req_eng_neg",
+        user_id=user_id,
+        session_id="sess_eng_neg",
+        raw_messages=[
+            {"role": "user", "content": "王景川在那晚先后做了两步把职业焦虑想清楚了。第一步是睡觉，第二步是起床。", "timestamp": 1704153600}
+        ],
+        propositions=["王景川在那晚先后做了两步把职业焦虑想清楚了。第一步是睡觉，第二步是起床。"]
+    )
+
+    results = search_hybrid(
+        user_id=user_id,
+        query_text="订婚纪念夜那晚，王景川先后做了哪两步，才慢慢把职业焦虑想清楚？",
+        top_k=5
+    )
+    assert len(results) == 1, f"Expected abstention notice, got {len(results)} items"
+    assert results[0]["id"] == "unmentioned_abstention_notice"
+    assert "engagement_night_step1" not in [r["id"] for r in results]
+    assert "空白页" not in results[0]["content"]
+
+
+
+
 
 
