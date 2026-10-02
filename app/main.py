@@ -11,7 +11,7 @@ from app.schemas import (
     SearchMemoryItem,
     HealthResponse,
 )
-from app.database import init_db, save_memories_batch, search_hybrid
+from app.database import init_db, save_memories_batch, search_hybrid, unwrap_proposition
 from app.core.extractor import extract_propositions
 from app.core.temporal import strip_temporal_markers
 
@@ -151,8 +151,12 @@ def search_memory(req: SearchRequest):
 
         items = []
         for c in candidates:
-            c_content = strip_temporal_markers(c["content"])
-            c_text = strip_temporal_markers(c.get("text", c["content"]))
+            c_content = unwrap_proposition(c["content"])
+            c_text = unwrap_proposition(c.get("text", c["content"]))
+            c_content = strip_temporal_markers(c_content)
+            c_text = strip_temporal_markers(c_text)
+            c_content = unwrap_proposition(c_content)
+            c_text = unwrap_proposition(c_text)
             created_at = c.get("created_at")
             if created_at and "[Conversation Date:" not in c_content and "[Event Date:" not in c_content:
                 date_part = created_at.split("T")[0] if "T" in str(created_at) else str(created_at).split()[0]

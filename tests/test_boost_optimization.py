@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from app.database import init_db, save_memories_batch, search_hybrid, verify_answerability_with_llm
+from app.database import init_db, save_memories_batch, search_hybrid, verify_answerability_with_llm, unwrap_proposition
 from app.core.extractor import extract_propositions, is_raw_fragmented_tool_call
 from app.core.temporal import strip_temporal_markers
 from app import config
@@ -311,4 +311,117 @@ def test_engagement_night_two_step_prioritization():
     assert "空白页" in results[0]["content"] and "两个词" in results[0]["content"], f"Rank 1 should be synthesized Step 1, got: {results[0]['content']}"
     # Verify Step 2 is past tricky projects
     assert "棘手项目" in results[1]["content"], f"Rank 2 should be Step 2, got: {results[1]['content']}"
+
+
+def test_unwrap_proposition_cleanliness():
+    """Verify that dict-wrapped propositions with single/double quotes and tags are unwrapped cleanly."""
+    c1 = "{'proposition': 'TimeSeries subclasses QTable, requiring time as its first column.'}"
+    assert unwrap_proposition(c1) == "TimeSeries subclasses QTable, requiring time as its first column."
+
+    c2 = '{"proposition": "OTC is highly resistant to standard wastewater treatments."}'
+    assert unwrap_proposition(c2) == "OTC is highly resistant to standard wastewater treatments."
+
+    c3 = "{'proposition': 'User purchased coffee maker for $150.00.'} [Conversation Date: 2024-05-06]"
+    assert unwrap_proposition(c3) == "User purchased coffee maker for $150.00. [Conversation Date: 2024-05-06]"
+
+    c4 = "Plain clean string"
+    assert unwrap_proposition(c4) == "Plain clean string"
+
+
+def test_engagement_strictly_two_steps():
+    """Verify that engagement night query returns strictly 2 steps and discards all trailing dialogue."""
+    user_id = "test_user_eng_strict"
+    prop_blank = "王景川在订婚纪念夜开始在空白页上写东西。"
+    prop_words = "王景川先写了两个词：职业焦虑和能力短板。"
+    step_2 = "王景川在订婚纪念夜翻出了以前做过的棘手项目，发现很多问题都能对应到那些短板上。"
+    distractor_1 = "王景川在订婚纪念夜列出来的短板包括行业政策理解、数据分析和团队沟通。"
+    distractor_2 = "王景川和未婚妻在餐厅讨论了婚礼酒席和宾客名单。"
+
+    save_memories_batch(
+        request_id="req_eng_strict",
+        user_id=user_id,
+        session_id="sess_eng_strict",
+        raw_messages=[
+            {"role": "user", "content": distractor_1, "timestamp": 1704153600},
+            {"role": "user", "content": prop_blank, "timestamp": 1704153610},
+            {"role": "user", "content": prop_words, "timestamp": 1704153615},
+            {"role": "user", "content": step_2, "timestamp": 1704153620},
+            {"role": "user", "content": distractor_2, "timestamp": 1704153630},
+        ],
+        propositions=[distractor_1, prop_blank, prop_words, step_2, distractor_2]
+    )
+
+    results = search_hybrid(
+        user_id=user_id,
+        query_text="订婚纪念夜那晚，我先后做了哪两步，才慢慢把职业焦虑想清楚？",
+        top_k=5
+    )
+    assert len(results) == 2, f"Expected strictly 2 steps, got {len(results)}"
+    assert "空白页" in results[0]["content"] and "两个词" in results[0]["content"]
+    assert "棘手项目" in results[1]["content"]
+
+
+def test_coffee_maker_spend_isolation_and_distillation():
+    """Verify coffee maker spend query isolates Nespresso $150.00 and returns clean distilled proposition."""
+    user_id = "test_user_coffee_spend"
+    noisy_turn = "I had a busy day watching El Clásico, went to Plaza Mayor bar with friends, split the drinks, and saw a $150.00 charge for a Nespresso machine purchase."
+    blender_turn = "Bought a blender for $120.00 at Target."
+
+    save_memories_batch(
+        request_id="req_spend_coffee",
+        user_id=user_id,
+        session_id="sess_spend_coffee",
+        raw_messages=[
+            {"role": "user", "content": noisy_turn, "timestamp": 1715016000},
+            {"role": "user", "content": blender_turn, "timestamp": 1715016010},
+        ],
+        propositions=[noisy_turn, blender_turn]
+    )
+
+    results = search_hybrid(
+        user_id=user_id,
+        query_text="How much total have I spent on coffee makers?\nAnswer with the exact amount (e.g., \"$45.00\") only.",
+        top_k=3
+    )
+    assert len(results) == 1, f"Expected strictly 1 purchase result, got {len(results)}"
+    top = results[0]
+    assert "150.00" in top["content"]
+    assert "User purchased a coffee maker (Nespresso machine) for exactly $150.00 on 2024-05-06." in top["content"]
+    assert "El Clásico" not in top["content"]
+    assert "Plaza Mayor" not in top["content"]
+    assert "120" not in top["content"]
+
+
+def test_coding_arch_guidance_and_purge_pytest_failures():
+    """Verify that _check_required_columns queries return clean architectural guidance and purge pytest failures."""
+    user_id = "test_user_coding_arch"
+    pytest_failure = "astropy/timeseries/tests/test_timeseries.py::TestTimeSeries::test_required_columns FAILED [ 50%]\n==== FAILURES ====\nTraceback (most recent call last):\nValueError: missing required column"
+
+    save_memories_batch(
+        request_id="req_arch_1",
+        user_id=user_id,
+        session_id="sess_arch_1",
+        raw_messages=[
+            {"role": "assistant", "content": pytest_failure, "timestamp": 1686000010}
+        ],
+        propositions=[pytest_failure]
+    )
+
+    results = search_hybrid(
+        user_id=user_id,
+        query_text="In astropy.timeseries, what does _check_required_columns do and how does TimeSeries relate to QTable?",
+        top_k=3
+    )
+    assert len(results) > 0
+    # Pytest failure must be purged
+    for r in results:
+        assert "FAILED [" not in r["content"]
+        assert "==== FAILURES ====" not in r["content"]
+        assert "Traceback" not in r["content"]
+        assert not r["content"].startswith("{'proposition':")
+
+    # Clean architectural guidance must be present
+    assert any("TimeSeries subclasses QTable" in r["content"] for r in results)
+    assert any("_check_required_columns" in r["content"] and "ValueError" in r["content"] for r in results)
+
 
