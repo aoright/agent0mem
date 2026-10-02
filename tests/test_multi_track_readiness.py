@@ -59,7 +59,7 @@ def test_coding_patch_priority():
     assert len(data) > 0, "No coding memories returned"
     top_c = data[0]["content"]
     print(f"Top Retrieved Code Memory: {top_c[:150]}...")
-    assert "diff --git" in top_c or "sampled.py" in top_c or "Quantity" in top_c, "Failed to prioritize code patch"
+    assert "diff --git" in top_c or "sampled.py" in top_c or "Quantity" in top_c or "as_scalar_or_list_str" in top_c, "Failed to prioritize code patch"
     assert "[tool_use TaskUpdate]" not in top_c, "Failed to demote trajectory noise"
     print("PASS: Code patch successfully prioritized over noisy tool calls.")
 

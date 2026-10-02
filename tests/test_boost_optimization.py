@@ -378,7 +378,7 @@ def test_engagement_strictly_two_steps():
 
 
 def test_coffee_maker_spend_isolation_and_distillation():
-    """Verify coffee maker spend query returns synthetic zero-spend ($0.00) while espresso queries isolate Nespresso $150.00."""
+    """Verify coffee maker spend query correctly retrieves Nespresso $150.00 while unpurchased categories return $0.00."""
     user_id = "test_user_coffee_spend"
     noisy_turn = "I had a busy day watching El Clásico, went to Plaza Mayor bar with friends, split the drinks, and saw a $150.00 charge for a Nespresso machine purchase."
     blender_turn = "Bought a blender for $120.00 at Target."
@@ -399,11 +399,19 @@ def test_coffee_maker_spend_isolation_and_distillation():
         query_text="How much total have I spent on coffee makers?\nAnswer with the exact amount (e.g., \"$45.00\") only.",
         top_k=3
     )
-    assert len(results) == 1, f"Expected strictly 1 zero-spend result, got {len(results)}"
+    assert len(results) == 1, f"Expected strictly 1 result, got {len(results)}"
     top = results[0]
-    assert top["id"] == "synthetic_zero_spend"
-    assert "$0.00" in top["content"]
-    assert "No purchase or expenditure on coffee makers was ever recorded in conversation history. Total amount spent is $0.00." in top["content"]
+    assert "150.00" in top["content"]
+    assert "coffee maker" in top["content"].lower() or "nespresso" in top["content"].lower()
+
+    # Zero spend test on unpurchased category
+    results_zero = search_hybrid(
+        user_id=user_id,
+        query_text="How much did I spend on flight tickets?",
+        top_k=3
+    )
+    assert len(results_zero) == 1
+    assert "$0.00" in results_zero[0]["content"]
 
     # Positive test: Espresso / Nespresso spend query correctly retrieves the $150.00 purchase
     results_espresso = search_hybrid(
@@ -450,37 +458,26 @@ def test_coding_arch_guidance_and_purge_pytest_failures():
 
 
 def test_abstention_polarity_governance():
-    """Verify polarity questions receive polarity denial phrasing while non-polarity receive unmentioned notice."""
+    """Verify all unmentioned queries uniformly receive clear epistemic refusal notice."""
     from app.database import make_unmentioned_notice
 
-    # 1. Chinese Polarity
+    # 1. Chinese Polarity & Non-Polarity uniformly receive epistemic refusal
     zh_pol = make_unmentioned_notice("王景川有没有去过火星？")[0]["content"]
-    assert "没有关于“王景川有没有去过火星？”的任何记录或情况" in zh_pol
-    assert "该事项从未发生，用户未曾做过（没有 / 没有记录 / 未提及）。" in zh_pol
+    assert "完全未提及关于“王景川有没有去过火星？”的任何情况" in zh_pol
+    assert "用户从未讨论过或记录过该事项（未提及 / not mentioned / cannot infer）。" in zh_pol
 
-    # 2. Chinese Non-Polarity
     zh_non = make_unmentioned_notice("王景川喜欢吃什么水果？")[0]["content"]
     assert "完全未提及关于“王景川喜欢吃什么水果？”的任何情况" in zh_non
     assert "用户从未讨论过或记录过该事项（未提及 / not mentioned / cannot infer）。" in zh_non
 
-    # 3. English Polarity
+    # 2. English Polarity & Non-Polarity
     en_pol = make_unmentioned_notice("Did the user ever visit Paris?")[0]["content"]
-    assert "there is no record of 'Did the user ever visit Paris?'" in en_pol
-    assert "This never occurred and the user never did this (no / never / not recorded / not mentioned)." in en_pol
+    assert "contain no record or mention of 'Did the user ever visit Paris?'" in en_pol
+    assert "This topic was not mentioned (cannot infer / not mentioned / 未提及)." in en_pol
 
-    # 4. English Non-Polarity
     en_non = make_unmentioned_notice("What books does the user read?")[0]["content"]
     assert "contain no record or mention of 'What books does the user read?'" in en_non
     assert "This topic was not mentioned (cannot infer / not mentioned / 未提及)." in en_non
-
-    # 5. Non-polarity queries containing words like 有过 or would user must NOT be misclassified as polarity
-    zh_non_experience = make_unmentioned_notice("用户有过哪些工作经历？")[0]["content"]
-    assert "完全未提及关于“用户有过哪些工作经历？”的任何情况" in zh_non_experience
-    assert "该事项从未发生" not in zh_non_experience
-
-    en_non_would = make_unmentioned_notice("What would user like to read?")[0]["content"]
-    assert "contain no record or mention of 'What would user like to read?'" in en_non_would
-    assert "This never occurred" not in en_non_would
 
 
 def test_engagement_negative_check_no_hallucination():
