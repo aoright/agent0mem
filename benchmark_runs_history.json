@@ -5496,5 +5496,441 @@
       ],
       "media_transport": "inline_data_uri"
     }
+  },
+  {
+    "timestamp": "2026-10-02T20:00:13.505197",
+    "evaluation_id": "teval_16cd8038104740bf",
+    "track": "coding",
+    "score_data": {
+      "score": 1.0,
+      "completed": 1,
+      "total": 1,
+      "tasks": 1,
+      "attempts": 2,
+      "difficulty": {
+        "noisy": {
+          "attempts": 1,
+          "completed": 1,
+          "file_localized_rate": 1.0,
+          "metrics": {
+            "avg_agent_steps": 46,
+            "avg_input_tokens": 515402,
+            "avg_output_tokens": 4610,
+            "avg_return_size_bytes": 766816,
+            "avg_search_time_ms": 463.2896576076746,
+            "avg_write_time_ms": 18421.386878937483,
+            "search_calls": 1
+          },
+          "noise_interference": {
+            "classified_task_count": 1,
+            "definition": {
+              "noise_ratio": "noise_trajectories / related_trajectories",
+              "noise_share": "noise_trajectories / (related_trajectories + noise_trajectories)",
+              "noise_trajectories": "unrelated",
+              "related_trajectories": "strong + weak"
+            },
+            "levels": [
+              {
+                "accuracy": 0.0,
+                "attempt_count": 0,
+                "completed": 0,
+                "label": "low",
+                "level": "L1",
+                "noise_ratio": {
+                  "max": 0.5,
+                  "mean": 0.0,
+                  "min": 0.0
+                },
+                "noise_share": {
+                  "max": 0,
+                  "mean": 0.0,
+                  "median": 0.0,
+                  "min": 0,
+                  "total": 0
+                },
+                "noise_share_range": {
+                  "max": 0.3333333333333333,
+                  "min": 0.0
+                },
+                "noise_trajectory_count": {
+                  "max": 0,
+                  "mean": 0.0,
+                  "median": 0.0,
+                  "min": 0,
+                  "total": 0
+                },
+                "related_trajectory_count": {
+                  "max": 0,
+                  "mean": 0.0,
+                  "median": 0.0,
+                  "min": 0,
+                  "total": 0
+                },
+                "resolved_count": 0.0,
+                "resolved_rate": 0.0,
+                "task_count": 0,
+                "total": 0
+              },
+              {
+                "accuracy": 0.0,
+                "attempt_count": 0,
+                "completed": 0,
+                "label": "medium_low",
+                "level": "L2",
+                "noise_ratio": {
+                  "max": 0.75,
+                  "mean": 0.0,
+                  "min": 0.5
+                },
+                "noise_share": {
+                  "max": 0,
+                  "mean": 0.0,
+                  "median": 0.0,
+                  "min": 0,
+                  "total": 0
+                },
+                "noise_share_range": {
+                  "max": 0.42857142857142855,
+                  "min": 0.3333333333333333
+                },
+                "noise_trajectory_count": {
+                  "max": 0,
+                  "mean": 0.0,
+                  "median": 0.0,
+                  "min": 0,
+                  "total": 0
+                },
+                "related_trajectory_count": {
+                  "max": 0,
+                  "mean": 0.0,
+                  "median": 0.0,
+                  "min": 0,
+                  "total": 0
+                },
+                "resolved_count": 0.0,
+                "resolved_rate": 0.0,
+                "task_count": 0,
+                "total": 0
+              },
+              {
+                "accuracy": 0.0,
+                "attempt_count": 0,
+                "completed": 0,
+                "label": "medium_high",
+                "level": "L3",
+                "noise_ratio": {
+                  "max": 1.0,
+                  "mean": 0.0,
+                  "min": 0.75
+                },
+                "noise_share": {
+                  "max": 0,
+                  "mean": 0.0,
+                  "median": 0.0,
+                  "min": 0,
+                  "total": 0
+                },
+                "noise_share_range": {
+                  "max": 0.5,
+                  "min": 0.42857142857142855
+                },
+                "noise_trajectory_count": {
+                  "max": 0,
+                  "mean": 0.0,
+                  "median": 0.0,
+                  "min": 0,
+                  "total": 0
+                },
+                "related_trajectory_count": {
+                  "max": 0,
+                  "mean": 0.0,
+                  "median": 0.0,
+                  "min": 0,
+                  "total": 0
+                },
+                "resolved_count": 0.0,
+                "resolved_rate": 0.0,
+                "task_count": 0,
+                "total": 0
+              },
+              {
+                "accuracy": 1.0,
+                "attempt_count": 1,
+                "completed": 1,
+                "label": "high",
+                "level": "L4",
+                "noise_ratio": {
+                  "max": 1.0,
+                  "mean": 1.0,
+                  "min": 1.0
+                },
+                "noise_share": {
+                  "max": 0.5,
+                  "mean": 0.5,
+                  "median": 0.5,
+                  "min": 0.5,
+                  "total": 0.5
+                },
+                "noise_share_range": {
+                  "max": 0.5,
+                  "min": 0.5
+                },
+                "noise_trajectory_count": {
+                  "max": 2,
+                  "mean": 2,
+                  "median": 2,
+                  "min": 2,
+                  "total": 2
+                },
+                "related_trajectory_count": {
+                  "max": 2,
+                  "mean": 2,
+                  "median": 2,
+                  "min": 2,
+                  "total": 2
+                },
+                "resolved_count": 1.0,
+                "resolved_rate": 1.0,
+                "task_count": 1,
+                "total": 1
+              }
+            ],
+            "unclassified_task_count": 0
+          },
+          "resolved_count": 1,
+          "resolved_rate": 1.0,
+          "score": 1.0,
+          "task_type": {
+            "bug_fix": {
+              "agent_steps": {
+                "max": 0,
+                "mean": 0.0,
+                "median": 0.0,
+                "min": 0,
+                "total": 0
+              },
+              "attempt_count": 0,
+              "completed": 0,
+              "file_localized_rate": 0.0,
+              "input_tokens": {
+                "max": 0,
+                "mean": 0.0,
+                "median": 0.0,
+                "min": 0,
+                "total": 0
+              },
+              "output_tokens": {
+                "max": 0,
+                "mean": 0.0,
+                "median": 0.0,
+                "min": 0,
+                "total": 0
+              },
+              "resolved_count": 0.0,
+              "resolved_rate": 0.0,
+              "return_size_bytes": {
+                "max": 0,
+                "mean": 0.0,
+                "median": 0.0,
+                "min": 0,
+                "total": 0
+              },
+              "score": 0.0,
+              "search_time_ms": {
+                "max": 0,
+                "mean": 0.0,
+                "median": 0.0,
+                "min": 0,
+                "total": 0
+              },
+              "total": 0,
+              "write_time_ms": {
+                "max": 0,
+                "mean": 0.0,
+                "median": 0.0,
+                "min": 0,
+                "total": 0
+              }
+            },
+            "new_feature": {
+              "agent_steps": {
+                "max": 46,
+                "mean": 46,
+                "median": 46,
+                "min": 46,
+                "total": 46
+              },
+              "attempt_count": 1,
+              "completed": 1,
+              "file_localized_rate": 1.0,
+              "input_tokens": {
+                "max": 515402,
+                "mean": 515402,
+                "median": 515402,
+                "min": 515402,
+                "total": 515402
+              },
+              "output_tokens": {
+                "max": 4610,
+                "mean": 4610,
+                "median": 4610,
+                "min": 4610,
+                "total": 4610
+              },
+              "resolved_count": 1.0,
+              "resolved_rate": 1.0,
+              "return_size_bytes": {
+                "max": 766816,
+                "mean": 766816,
+                "median": 766816,
+                "min": 766816,
+                "total": 766816
+              },
+              "score": 1.0,
+              "search_time_ms": {
+                "max": 463.2896576076746,
+                "mean": 463.2896576076746,
+                "median": 463.2896576076746,
+                "min": 463.2896576076746,
+                "total": 463.2896576076746
+              },
+              "total": 1,
+              "write_time_ms": {
+                "max": 18421.386878937483,
+                "mean": 18421.386878937483,
+                "median": 18421.386878937483,
+                "min": 18421.386878937483,
+                "total": 18421.386878937483
+              }
+            }
+          },
+          "total": 1
+        },
+        "relevant": {
+          "attempts": 1,
+          "completed": 1,
+          "file_localized_rate": 1.0,
+          "metrics": {
+            "avg_agent_steps": 57,
+            "avg_input_tokens": 762186,
+            "avg_output_tokens": 5889,
+            "avg_return_size_bytes": 621434,
+            "avg_search_time_ms": 401.63550339639187,
+            "avg_write_time_ms": 16819.888764992356,
+            "search_calls": 1
+          },
+          "resolved_count": 1,
+          "resolved_rate": 1.0,
+          "score": 1.0,
+          "task_type": {
+            "bug_fix": {
+              "agent_steps": {
+                "max": 0,
+                "mean": 0.0,
+                "median": 0.0,
+                "min": 0,
+                "total": 0
+              },
+              "attempt_count": 0,
+              "completed": 0,
+              "file_localized_rate": 0.0,
+              "input_tokens": {
+                "max": 0,
+                "mean": 0.0,
+                "median": 0.0,
+                "min": 0,
+                "total": 0
+              },
+              "output_tokens": {
+                "max": 0,
+                "mean": 0.0,
+                "median": 0.0,
+                "min": 0,
+                "total": 0
+              },
+              "resolved_count": 0.0,
+              "resolved_rate": 0.0,
+              "return_size_bytes": {
+                "max": 0,
+                "mean": 0.0,
+                "median": 0.0,
+                "min": 0,
+                "total": 0
+              },
+              "score": 0.0,
+              "search_time_ms": {
+                "max": 0,
+                "mean": 0.0,
+                "median": 0.0,
+                "min": 0,
+                "total": 0
+              },
+              "total": 0,
+              "write_time_ms": {
+                "max": 0,
+                "mean": 0.0,
+                "median": 0.0,
+                "min": 0,
+                "total": 0
+              }
+            },
+            "new_feature": {
+              "agent_steps": {
+                "max": 57,
+                "mean": 57,
+                "median": 57,
+                "min": 57,
+                "total": 57
+              },
+              "attempt_count": 1,
+              "completed": 1,
+              "file_localized_rate": 1.0,
+              "input_tokens": {
+                "max": 762186,
+                "mean": 762186,
+                "median": 762186,
+                "min": 762186,
+                "total": 762186
+              },
+              "output_tokens": {
+                "max": 5889,
+                "mean": 5889,
+                "median": 5889,
+                "min": 5889,
+                "total": 5889
+              },
+              "resolved_count": 1.0,
+              "resolved_rate": 1.0,
+              "return_size_bytes": {
+                "max": 621434,
+                "mean": 621434,
+                "median": 621434,
+                "min": 621434,
+                "total": 621434
+              },
+              "score": 1.0,
+              "search_time_ms": {
+                "max": 401.63550339639187,
+                "mean": 401.63550339639187,
+                "median": 401.63550339639187,
+                "min": 401.63550339639187,
+                "total": 401.63550339639187
+              },
+              "total": 1,
+              "write_time_ms": {
+                "max": 16819.888764992356,
+                "mean": 16819.888764992356,
+                "median": 16819.888764992356,
+                "min": 16819.888764992356,
+                "total": 16819.888764992356
+              }
+            }
+          },
+          "total": 1
+        }
+      },
+      "contract": "cambench-coding-relevant-noisy-300-v1",
+      "result_schema_version": "coding-result-v1"
+    }
   }
 ]
