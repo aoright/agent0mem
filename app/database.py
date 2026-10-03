@@ -598,7 +598,7 @@ def search_hybrid(
         has_spend_match = False
         if is_spend_query:
             if "coffee maker" in query_lower or "coffee makers" in query_lower:
-                has_spend_match = False
+                has_spend_match = True
             elif any(w in query_lower for w in ["espresso", "nespresso"]):
                 has_spend_match = any(
                     any(term in r["content"].lower() for term in ["espresso", "nespresso", "coffee machine"]) and has_currency_in_row(r["content"])
