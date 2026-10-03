@@ -26,7 +26,7 @@ from typing import Dict, List, Any, Tuple
 
 REMOTE_HOST = "root@47.97.127.223"
 SSH_KEY = "/Users/liuyukai/CREATE/PandaAI/nunu/admin_key"
-DASHSCOPE_KEY = "sk-9fd022652eb04990bcc024bbb0d5e020"
+DASHSCOPE_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
 
 SEASON_TARGETS = {
     "textual": 87.0,

@@ -11,6 +11,14 @@ from app.config import DASHSCOPE_API_KEY, DASHSCOPE_BASE_URL, ENABLE_LLM_EXTRACT
 
 logger = logging.getLogger("agent0mem.extractor")
 
+import os as _os
+
+# A single 6 s attempt timed out under load and silently stored raw dialogue as
+# "propositions". Defaults below give the extractor room to finish.
+EXTRACTION_MODEL = _os.environ.get("AGENT0MEM_EXTRACTION_MODEL", "qwen-turbo")
+EXTRACTION_TIMEOUT_SEC = float(_os.environ.get("AGENT0MEM_EXTRACTION_TIMEOUT_SEC", "20"))
+EXTRACTION_ATTEMPTS = int(_os.environ.get("AGENT0MEM_EXTRACTION_ATTEMPTS", "2"))
+
 
 def is_raw_fragmented_tool_call(content: str) -> bool:
     """Check if content is a raw fragmented tool call or tool execution noise without code patches."""
@@ -138,7 +146,7 @@ def extract_propositions(messages: List[Dict[str, Any]]) -> List[str]:
             "Content-Type": "application/json"
         }
         payload = json.dumps({
-            "model": "qwen-turbo",
+            "model": EXTRACTION_MODEL,
             "messages": [
                 {"role": "system", "content": EXTRACTION_PROMPT},
                 {"role": "user", "content": f"Conversation:\n{dialogue_for_llm}\n\nAtomic Propositions (JSON array):"}
@@ -147,10 +155,10 @@ def extract_propositions(messages: List[Dict[str, Any]]) -> List[str]:
             "max_tokens": 4096
         }).encode("utf-8")
 
-        for attempt in range(1):
+        for attempt in range(EXTRACTION_ATTEMPTS):
             try:
                 req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-                with urllib.request.urlopen(req, timeout=6.0) as resp:
+                with urllib.request.urlopen(req, timeout=EXTRACTION_TIMEOUT_SEC) as resp:
                     if resp.status == 200:
                         result = json.loads(resp.read().decode("utf-8"))
                         raw_text = result.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
@@ -175,8 +183,8 @@ def extract_propositions(messages: List[Dict[str, Any]]) -> List[str]:
                         logger.warning(f"Qwen-turbo extraction HTTP {resp.status}")
             except Exception as e:
                 logger.warning(f"Qwen-turbo extraction attempt {attempt + 1} error: {str(e)}")
-                if attempt == 0:
-                    time.sleep(0.5)
+                if attempt + 1 < EXTRACTION_ATTEMPTS:
+                    time.sleep(1.0 * (attempt + 1))
     except Exception as e:
         logger.warning(f"LLM proposition extraction outer fallback: {str(e)}")
 

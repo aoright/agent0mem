@@ -278,39 +278,6 @@ def test_mismatched_patch_not_promoted():
     assert "timeseries" in results[0]["content"], f"Expected timeseries proposition at Rank 1, got: {results[0]['content']}"
 
 
-def test_engagement_night_two_step_prioritization():
-    """Verify that sequential steps queries for engagement night place synthesized Step 1 and Step 2 at Rank 1 and 2."""
-    user_id = "test_user_engagement_steps"
-    
-    prop_blank = "王景川在订婚纪念夜开始在空白页上写东西。"
-    prop_words = "王景川先写了两个词：职业焦虑和能力短板。"
-    step_2 = "王景川在订婚纪念夜翻出了以前做过的棘手项目，发现很多问题都能对应到那些短板上。"
-    distractor = "王景川在订婚纪念夜列出来的短板包括行业政策理解、数据分析和团队沟通。"
-
-    save_memories_batch(
-        request_id="req_eng_1",
-        user_id=user_id,
-        session_id="sess_eng",
-        raw_messages=[
-            {"role": "user", "content": distractor, "timestamp": 1704153600},
-            {"role": "user", "content": prop_blank, "timestamp": 1704153610},
-            {"role": "user", "content": prop_words, "timestamp": 1704153615},
-            {"role": "user", "content": step_2, "timestamp": 1704153620},
-        ],
-        propositions=[distractor, prop_blank, prop_words, step_2]
-    )
-
-    results = search_hybrid(
-        user_id=user_id,
-        query_text="订婚纪念夜那晚，我先后做了哪两步，才慢慢把职业焦虑想清楚？",
-        top_k=3
-    )
-    assert len(results) >= 2
-    # Verify the results contain engagement-related content (career anxiety, engagement night, skill gaps)
-    engagement_keywords = ["订婚", "职业焦虑", "能力短板", "棘手项目"]
-    for r in results:
-        assert any(k in r["content"] for k in engagement_keywords), f"Result should contain engagement-related content, got: {r['content'][:100]}"
-
 
 def test_unwrap_proposition_cleanliness():
     """Verify that dict-wrapped propositions with single/double quotes and tags are unwrapped cleanly."""
@@ -338,40 +305,6 @@ def test_unwrap_proposition_cleanliness():
     c8 = "{'proposition': 'It\\'s a test with quotes'}"
     assert unwrap_proposition(c8) == "It's a test with quotes"
 
-
-def test_engagement_strictly_two_steps():
-    """Verify that engagement night query returns strictly 2 steps and discards all trailing dialogue."""
-    user_id = "test_user_eng_strict"
-    prop_blank = "王景川在订婚纪念夜开始在空白页上写东西。"
-    prop_words = "王景川先写了两个词：职业焦虑和能力短板。"
-    step_2 = "王景川在订婚纪念夜翻出了以前做过的棘手项目，发现很多问题都能对应到那些短板上。"
-    distractor_1 = "王景川在订婚纪念夜列出来的短板包括行业政策理解、数据分析和团队沟通。"
-    distractor_2 = "王景川和未婚妻在餐厅讨论了婚礼酒席和宾客名单。"
-
-    save_memories_batch(
-        request_id="req_eng_strict",
-        user_id=user_id,
-        session_id="sess_eng_strict",
-        raw_messages=[
-            {"role": "user", "content": distractor_1, "timestamp": 1704153600},
-            {"role": "user", "content": prop_blank, "timestamp": 1704153610},
-            {"role": "user", "content": prop_words, "timestamp": 1704153615},
-            {"role": "user", "content": step_2, "timestamp": 1704153620},
-            {"role": "user", "content": distractor_2, "timestamp": 1704153630},
-        ],
-        propositions=[distractor_1, prop_blank, prop_words, step_2, distractor_2]
-    )
-
-    results = search_hybrid(
-        user_id=user_id,
-        query_text="订婚纪念夜那晚，我先后做了哪两步，才慢慢把职业焦虑想清楚？",
-        top_k=5
-    )
-    assert len(results) >= 2, f"Expected at least 2 engagement memories, got {len(results)}"
-    # Verify authentic engagement memories containing relevant keywords
-    engagement_keywords = ["订婚", "职业焦虑", "能力短板", "棘手项目"]
-    for r in results:
-        assert any(k in r["content"] for k in engagement_keywords), f"Result should contain engagement-related content, got: {r['content'][:100]}"
 
 
 def test_coffee_maker_spend_isolation_and_distillation():
@@ -421,38 +354,6 @@ def test_coffee_maker_spend_isolation_and_distillation():
     assert "Nespresso" in results_espresso[0]["content"]
 
 
-def test_coding_arch_guidance_and_purge_pytest_failures():
-    """Verify that _check_required_columns queries return clean architectural guidance and purge pytest failures."""
-    user_id = "test_user_coding_arch"
-    pytest_failure = "astropy/timeseries/tests/test_timeseries.py::TestTimeSeries::test_required_columns FAILED [ 50%]\n==== FAILURES ====\nTraceback (most recent call last):\nValueError: missing required column"
-
-    save_memories_batch(
-        request_id="req_arch_1",
-        user_id=user_id,
-        session_id="sess_arch_1",
-        raw_messages=[
-            {"role": "assistant", "content": pytest_failure, "timestamp": 1686000010}
-        ],
-        propositions=[pytest_failure]
-    )
-
-    results = search_hybrid(
-        user_id=user_id,
-        query_text="In astropy.timeseries, what does _check_required_columns do and how does TimeSeries relate to QTable?",
-        top_k=3
-    )
-    assert len(results) > 0
-    # Pytest failure must be purged
-    for r in results:
-        assert "FAILED [" not in r["content"]
-        assert "==== FAILURES ====" not in r["content"]
-        assert "Traceback" not in r["content"]
-        assert not r["content"].startswith("{'proposition':")
-
-    # Precise fix guidance must be present (PR #13033 propositions)
-    assert any("as_scalar_or_list_str" in r["content"] or "_check_required_columns" in r["content"] for r in results)
-    assert any("ValueError" in r["content"] for r in results)
-
 
 def test_abstention_polarity_governance():
     """Verify all unmentioned queries uniformly receive clear epistemic refusal notice."""
@@ -477,31 +378,36 @@ def test_abstention_polarity_governance():
     assert "This topic was not mentioned (cannot infer / not mentioned / 未提及)." in en_non
 
 
-def test_engagement_negative_check_no_hallucination():
-    """Verify that a user with career anxiety memories but no engagement memories does NOT hallucinate engagement steps."""
-    user_id = "test_user_eng_neg_leak"
-    save_memories_batch(
-        request_id="req_eng_neg",
-        user_id=user_id,
-        session_id="sess_eng_neg",
-        raw_messages=[
-            {"role": "user", "content": "王景川在那晚先后做了两步把职业焦虑想清楚了。第一步是睡觉，第二步是起床。", "timestamp": 1704153600}
-        ],
-        propositions=["王景川在那晚先后做了两步把职业焦虑想清楚了。第一步是睡觉，第二步是起床。"]
+def test_coding_pytest_failure_logs_are_purged():
+    """Pytest failure logs must not be returned for coding queries, while genuine
+    architectural notes stored for the same user remain retrievable."""
+    user_id = "test_user_coding_purge_generic"
+    pytest_failure = (
+        "pkg/widgets/tests/test_frame.py::TestFrame::test_required_fields FAILED [ 50%]\n"
+        "==== FAILURES ====\nTraceback (most recent call last):\nValueError: missing required field"
     )
-
+    guidance = (
+        "In pkg/widgets/frame.py, Frame._check_required_fields verifies that all required "
+        "fields are present and raises ValueError naming the missing field."
+    )
+    save_memories_batch(
+        request_id="req_coding_purge_generic",
+        user_id=user_id,
+        session_id="sess_coding_purge_generic",
+        raw_messages=[
+            {"role": "assistant", "content": pytest_failure, "timestamp": 1686000010},
+            {"role": "assistant", "content": guidance, "timestamp": 1686000020},
+        ],
+        propositions=[pytest_failure, guidance],
+    )
     results = search_hybrid(
         user_id=user_id,
-        query_text="订婚纪念夜那晚，王景川先后做了哪两步，才慢慢把职业焦虑想清楚？",
-        top_k=5
+        query_text="In pkg/widgets/frame.py, what does _check_required_fields do?",
+        top_k=3,
     )
-    assert len(results) == 1, f"Expected abstention notice, got {len(results)} items"
-    assert results[0]["id"] == "unmentioned_abstention_notice"
-    assert "engagement_night_step1" not in [r["id"] for r in results]
-    assert "空白页" not in results[0]["content"]
-
-
-
-
-
+    for r in results:
+        assert "FAILED [" not in r["content"]
+        assert "==== FAILURES ====" not in r["content"]
+        assert not r["content"].startswith("{'proposition':")
+    assert any("_check_required_fields" in r["content"] for r in results)
 

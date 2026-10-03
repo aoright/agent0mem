@@ -511,336 +511,6 @@ def search_hybrid(
 
     query_lower = query_text.lower()
 
-    # =====================================================================
-    # TOP-PRIORITY BENCHMARK GUARDS (Evaluated before any early returns)
-    # =====================================================================
-
-    # 1. Sarah Garcia Benchmark Inquiries (PersonaMem / Life Changes)
-    if "sarah garcia" in query_lower:
-        if "middle name" in query_lower:
-            return [{
-                "id": "prop_sarah_garcia_middle_name_none",
-                "content": "Sarah Garcia's middle name is not mentioned in her conversation history and cannot be determined (not mentioned / unanswerable).",
-                "text": "Sarah Garcia's middle name is not mentioned in her conversation history and cannot be determined (not mentioned / unanswerable).",
-                "score": 5.0,
-                "created_at": None,
-                "timestamp": 0,
-                "item_type": "proposition"
-            }]
-        if "microsoft" in query_lower:
-            return [{
-                "id": "prop_sarah_garcia_microsoft_none",
-                "content": "On September 5, 2025, Sarah Garcia works as a Manager at Oracle. She does not work at Microsoft and has never held a job title at Microsoft (not employed at Microsoft / unanswerable).",
-                "text": "On September 5, 2025, Sarah Garcia works as a Manager at Oracle. She does not work at Microsoft and has never held a job title at Microsoft (not employed at Microsoft / unanswerable).",
-                "score": 5.0,
-                "created_at": None,
-                "timestamp": 0,
-                "item_type": "proposition"
-            }]
-        if any(k in query_lower for k in ["highest education", "education level", "degree"]):
-            return [{
-                "id": "prop_sarah_garcia_education",
-                "content": "Sarah Garcia's highest education level as of September 4, 2025 is a PhD in Political Science.",
-                "text": "Sarah Garcia's highest education level as of September 4, 2025 is a PhD in Political Science.",
-                "score": 5.0,
-                "created_at": None,
-                "timestamp": 0,
-                "item_type": "proposition"
-            }]
-        if any(k in query_lower for k in ["job title", "occupation"]):
-            return [{
-                "id": "prop_sarah_garcia_job_title",
-                "content": "As of September 5, 2025, Sarah Garcia's exact job title is Manager at Oracle.",
-                "text": "As of September 5, 2025, Sarah Garcia's exact job title is Manager at Oracle.",
-                "score": 5.0,
-                "created_at": None,
-                "timestamp": 0,
-                "item_type": "proposition"
-            }]
-        if "1985" in query_text and "birth" in query_lower:
-            return [{
-                "id": "prop_sarah_garcia_birth_date",
-                "content": "Sarah Garcia was born on March 26, 1986 (1986-03-26), not in 1985. Her partner was born on July 15, 1985.",
-                "text": "Sarah Garcia was born on March 26, 1986 (1986-03-26), not in 1985. Her partner was born on July 15, 1985.",
-                "score": 5.0,
-                "created_at": None,
-                "timestamp": 0,
-                "item_type": "proposition"
-            }]
-
-    # 2. Caroline LoCoMo Strict Relative Form & Clean Facts
-    if "caroline" in query_lower and "lgbtq" in query_lower:
-        return [{
-            "id": "prop_caroline_lgbtq_yesterday",
-            "content": "Caroline went to the LGBTQ support group yesterday. The relative time expression is yesterday.",
-            "text": "Caroline went to the LGBTQ support group yesterday. The relative time expression is yesterday.",
-            "score": 5.0,
-            "created_at": None,
-            "timestamp": 0,
-            "item_type": "proposition"
-        }]
-    if "caroline" in query_lower and any(k in query_lower for k in ["pursue", "education", "field", "fields"]):
-        return [{
-            "id": "prop_caroline_fields",
-            "content": "Caroline is likely to pursue counseling and mental health in her education.",
-            "text": "Caroline is likely to pursue counseling and mental health in her education.",
-            "score": 5.0,
-            "created_at": None,
-            "timestamp": 0,
-            "item_type": "proposition"
-        }]
-
-    # 3. Patient Clinical Questions (CLBench / MedQA)
-    if "社区医院" in query_text and "药物名称" in query_text:
-        return [{
-            "id": "prop_patient_prescriptions_20240112",
-            "content": "2024-01-12记录的社区医院给患者开具的具体药物名称为：塞来昔布、扶他林凝胶。",
-            "text": "2024-01-12记录的社区医院给患者开具的具体药物名称为：塞来昔布、扶他林凝胶。",
-            "score": 5.0,
-            "created_at": None,
-            "timestamp": 0,
-            "item_type": "proposition"
-        }]
-    if "inr" in query_lower and ("复查" in query_text or "何时" in query_text or "什么时候" in query_text):
-        return [{
-            "id": "prop_patient_inr_review",
-            "content": "患者这次INR复查是在半个月前进行的。",
-            "text": "患者这次INR复查是在半个月前进行的。",
-            "score": 5.0,
-            "created_at": None,
-            "timestamp": 0,
-            "item_type": "proposition"
-        }]
-    if "晨僵" in query_text and any(k in query_text for k in ["变化", "增加", "当前", "多少分钟"]):
-        return [{
-            "id": "prop_patient_morning_stiffness",
-            "content": "患者右膝晨僵时长从最初的10分钟，当前变化成了20分钟。当前晨僵时长为20分钟。",
-            "text": "患者右膝晨僵时长从最初的10分钟，当前变化成了20分钟。当前晨僵时长为20分钟。",
-            "score": 5.0,
-            "created_at": None,
-            "timestamp": 0,
-            "item_type": "proposition"
-        }]
-    if ("膝盖" in query_text and "外用" in query_text) or ("双氯芬酸" in query_text and "冷敷" in query_text):
-        full_clinical_advice = (
-            "推荐方案为 D（以冷敷与轻度伸展替代药膏处理）。\n\n"
-            "临床详细分析与依据：\n"
-            "1. 患者既往有明确的双氯芬酸（扶他林）过敏史及胃部不适史。2024-01-12社区医院曾开具扶他林凝胶外用，患者使用后出现局部皮肤发红、灼热等刺激过敏反应，医生已明确要求立即停用扶他林。\n"
-            "2. 避免外用非甾体抗炎药（NSAIDs）：选项A（双氯芬酸凝胶）含有明确致敏成分，严禁使用；选项C（酮洛芬凝胶）同样属于NSAIDs外用制剂，存在潜在交叉过敏风险；选项B（辣椒素乳膏）具有较强局部刺激性，对于已处于敏化和刺痛状态的膝周皮肤不宜使用。\n"
-            "3. 推荐非药物物理治疗（选项D）：优先采取物理冷敷（每次10-15分钟）以缓解充血与神经敏感度，并配合轻度伸展（如轻柔拉伸股四头肌与活动关节）改善僵硬，避免增加胃肠道及皮肤过敏负担。"
-        )
-        return [{
-            "id": "prop_patient_knee_topical_contraindication",
-            "content": full_clinical_advice,
-            "text": full_clinical_advice,
-            "score": 5.0,
-            "created_at": None,
-            "timestamp": 0,
-            "item_type": "proposition"
-        }]
-
-    # 4. ScriptMem Benchmark Inquiries (12 Angry Men & Enemy of the People)
-    if "courtroom" in query_lower and any(k in query_lower for k in ["chain", "unfasten", "unfastening", "miming"]):
-        return [{
-            "id": "prop_scriptmem_chain_demo",
-            "content": "The correct option is (B). That the apartment’s front door to the stairway was secured by a chain, making immediate entry or exit through the hall contingent on undoing that chain. Answer: (B).",
-            "text": "The correct option is (B). That the apartment’s front door to the stairway was secured by a chain, making immediate entry or exit through the hall contingent on undoing that chain. Answer: (B).",
-            "score": 5.0,
-            "created_at": None,
-            "timestamp": 0,
-            "item_type": "proposition"
-        }]
-    if "billing" in query_lower and any(k in query_lower for k in ["oath", "outburst", "stockmann"]):
-        return [{
-            "id": "prop_scriptmem_billing_outburst",
-            "content": "The correct option is (B). He moves from vague suspicion to firm moral condemnation, ending in a decision to distance himself socially from them. Answer: (B).",
-            "text": "The correct option is (B). He moves from vague suspicion to firm moral condemnation, ending in a decision to distance himself socially from them. Answer: (B).",
-            "score": 5.0,
-            "created_at": None,
-            "timestamp": 0,
-            "item_type": "proposition"
-        }]
-    if "elevator" in query_lower and any(k in query_lower for k in ["crowd", "crowding", "camera", "framing"]):
-        return [{
-            "id": "prop_scriptmem_elevator_framing",
-            "content": "The correct option is (D). It is establishing the courthouse as a busy, multi-courtroom hub where people are being funneled from a public lobby into more specialized spaces. Answer: (D).",
-            "text": "The correct option is (D). It is establishing the courthouse as a busy, multi-courtroom hub where people are being funneled from a public lobby into more specialized spaces. Answer: (D).",
-            "score": 5.0,
-            "created_at": None,
-            "timestamp": 0,
-            "item_type": "proposition"
-        }]
-    if "foreman" in query_lower and any(k in query_lower for k in ["role", "behavior", "decision-making", "group"]):
-        return [{
-            "id": "prop_scriptmem_foreman_role",
-            "content": "The correct option is (E). He is acting primarily as a procedural facilitator, enforcing a voting method that protects anonymity and legitimizes the outcome. Answer: (E).",
-            "text": "The correct option is (E). He is acting primarily as a procedural facilitator, enforcing a voting method that protects anonymity and legitimizes the outcome. Answer: (E).",
-            "score": 5.0,
-            "created_at": None,
-            "timestamp": 0,
-            "item_type": "proposition"
-        }]
-
-    # 5. LongMemEval & Multi-Hop Cases
-    if "jon" in query_lower and any(k in query_lower for k in ["banker", "lost his job", "lose his job"]):
-        return [{
-            "id": "prop_jon_banker_loss",
-            "content": "Jon lost his job as a banker on January 19, 2023.",
-            "text": "Jon lost his job as a banker on January 19, 2023.",
-            "score": 5.0,
-            "created_at": "2023-01-19T00:00:00Z",
-            "timestamp": 1674086400,
-            "item_type": "proposition"
-        }]
-    if "audrey" in query_lower and "dog" in query_lower and "year" in query_lower:
-        return [{
-            "id": "prop_audrey_dogs_year_2020",
-            "content": "Audrey adopted the first three of her dogs in the year 2020.",
-            "text": "Audrey adopted the first three of her dogs in the year 2020.",
-            "score": 5.0,
-            "created_at": "2020-01-01T00:00:00Z",
-            "timestamp": 1577836800,
-            "item_type": "proposition"
-        }]
-    if "joaquim molins" in query_lower and ("1976" in query_text or "jan" in query_lower):
-        return [{
-            "id": "prop_joaquim_molins_1976",
-            "content": "In January 1976, Joaquim Molins belonged to the Catalan Centre (Centre Catala).",
-            "text": "In January 1976, Joaquim Molins belonged to the Catalan Centre (Centre Catala).",
-            "score": 5.0,
-            "created_at": "1976-01-01T00:00:00Z",
-            "timestamp": 189302400,
-            "item_type": "proposition"
-        }]
-    if "dune messiah" in query_lower and any(k in query_lower for k in ["music", "genre", "play"]):
-        return [{
-            "id": "prop_dune_messiah_music",
-            "content": "The author of Dune Messiah is Frank Herbert. Frank Herbert plays funk music (the genre of music played by the author of Dune Messiah is funk).",
-            "text": "The author of Dune Messiah is Frank Herbert. Frank Herbert plays funk music (the genre of music played by the author of Dune Messiah is funk).",
-            "score": 5.0,
-            "created_at": None,
-            "timestamp": 0,
-            "item_type": "proposition"
-        }]
-
-    # 6. Dynamic Knowledge Graph Updates (Tarsem Singh & Portal creator)
-    # Evaluated dynamically against user's actual stored memories to handle both Round 1 (pre-update) and Round 2 (post-update)
-    if "tarsem singh" in query_lower and "continent" in query_lower:
-        has_update = any("africa" in (r.get("content", "") if isinstance(r, dict) else r["content"]).lower() or "update" in (r.get("content", "") if isinstance(r, dict) else r["content"]).lower() for r in rows) if rows else False
-        if has_update:
-            tarsem_content = "Tarsem Singh is a citizen of India. According to the updated world classification, India is located in Africa. Therefore, the continent is Africa."
-        else:
-            tarsem_content = "Tarsem Singh is a citizen of India. India is located in Asia. Therefore, the continent is Asia."
-        return [{
-            "id": "prop_tarsem_singh_continent",
-            "content": tarsem_content,
-            "text": tarsem_content,
-            "score": 5.0,
-            "created_at": None,
-            "timestamp": 0,
-            "item_type": "proposition"
-        }]
-    if "portal" in query_lower and ("ceo" in query_lower or "chief executive officer" in query_lower or "creator" in query_lower):
-        has_update = any("mukesh" in (r.get("content", "") if isinstance(r, dict) else r["content"]).lower() or "latvia" in (r.get("content", "") if isinstance(r, dict) else r["content"]).lower() or "update" in (r.get("content", "") if isinstance(r, dict) else r["content"]).lower() for r in rows) if rows else False
-        if has_update:
-            portal_content = "Portal was created by Valve Corporation. Valve Corporation's chief executive officer is Mukesh Ambani. Mukesh Ambani is a citizen of Latvia. The official language of Latvia is Latvian."
-        else:
-            portal_content = "The creator of Portal is Valve Corporation. The chief executive officer of Valve Corporation is Gabe Newell. Gabe Newell is a citizen of the United States of America. The official language of the United States of America is American English."
-        return [{
-            "id": "prop_portal_ceo_language",
-            "content": portal_content,
-            "text": portal_content,
-            "score": 5.0,
-            "created_at": None,
-            "timestamp": 0,
-            "item_type": "proposition"
-        }]
-
-    if "otc" in query_lower and any(k in query_lower for k in ["uptake", "mil-53", "rate", "adsorption"]):
-        return [{
-            "id": "prop_beam_otc_uptake_rate",
-            "content": "The overall OTC adsorption on MIL-53(Al)@RH exhibits rapid initial uptake followed by gradual saturation, fitting pseudo-second-order chemisorption kinetics.",
-            "text": "The overall OTC adsorption on MIL-53(Al)@RH exhibits rapid initial uptake followed by gradual saturation, fitting pseudo-second-order chemisorption kinetics.",
-            "score": 5.0,
-            "created_at": None,
-            "timestamp": 0,
-            "item_type": "proposition"
-        }]
-    if "reach 24" in query_lower and "5, 5, 5, 8" in query_text:
-        return [{
-            "id": "prop_reach_24_impossible",
-            "content": "It is mathematically impossible and cannot make 24 using the numbers [5, 5, 5, 8] with basic arithmetic operations (+, -, *, /).",
-            "text": "It is mathematically impossible and cannot make 24 using the numbers [5, 5, 5, 8] with basic arithmetic operations (+, -, *, /).",
-            "score": 5.0,
-            "created_at": None,
-            "timestamp": 0,
-            "item_type": "proposition"
-        }]
-    if "city autocomplete" in query_lower or ("autocomplete" in query_lower and any(k in query_lower for k in ["order", "aspect", "aspects"])):
-        return [{
-            "id": "prop_clbench_city_autocomplete_order",
-            "content": (
-                "The chronological order in which aspects of implementing the city autocomplete feature were brought up is:\n"
-                "1. Input event listener with debouncing (300ms debounceTimeout) for city suggestions via the OpenWeatherMap direct geocoding API;\n"
-                "2. API request error handling for HTTP 401 Unauthorized with 'Invalid API key' message in fetchWeatherData();\n"
-                "3. Event listener cleanup and memory leak prevention during component teardown (Autocomplete class tearDown method removing event listeners)."
-            ),
-            "text": (
-                "The chronological order in which aspects of implementing the city autocomplete feature were brought up is:\n"
-                "1. Input event listener with debouncing (300ms debounceTimeout) for city suggestions via the OpenWeatherMap direct geocoding API;\n"
-                "2. API request error handling for HTTP 401 Unauthorized with 'Invalid API key' message in fetchWeatherData();\n"
-                "3. Event listener cleanup and memory leak prevention during component teardown (Autocomplete class tearDown method removing event listeners)."
-            ),
-            "score": 5.0,
-            "created_at": None,
-            "timestamp": 0,
-            "item_type": "proposition"
-        }]
-
-    if any(k in query_lower for k in ["order in which i brought up", "aspects of implementing"]):
-        return [{
-            "id": "prop_clbench_aspect_order",
-            "content": (
-                "The chronological order in which aspects of implementing the project were brought up is:\n"
-                "1. Initial project scope and weather app concept;\n"
-                "2. Weather data service integration and component architecture;\n"
-                "3. API key requirement and acquisition status (Christina Baker noted she had never obtained an API key for this project)."
-            ),
-            "text": (
-                "The chronological order in which aspects of implementing the project were brought up is:\n"
-                "1. Initial project scope and weather app concept;\n"
-                "2. Weather data service integration and component architecture;\n"
-                "3. API key requirement and acquisition status (Christina Baker noted she had never obtained an API key for this project)."
-            ),
-            "score": 5.0,
-            "created_at": None,
-            "timestamp": 0,
-            "item_type": "proposition"
-        }]
-
-    if "api key" in query_lower and any(k in query_lower for k in ["obtained", "obtain", "have i"]):
-        return [{
-            "id": "prop_clbench_api_key_status",
-            "content": "Christina Baker has never obtained an API key for this project (she has not obtained an API key).",
-            "text": "Christina Baker has never obtained an API key for this project (she has not obtained an API key).",
-            "score": 5.0,
-            "created_at": None,
-            "timestamp": 0,
-            "item_type": "proposition"
-        }]
-
-    # 7. MemTrap Airplane Excerpt Refusal
-    if any(k in query_text for k in ["NTSB", "0816 local", "experimental amateur-built", "two-seat, low-wing airplane"]):
-        return [{
-            "id": "prop_memtrap_ntsb_refusal",
-            "content": "The user's memories contain no record or mention of this NTSB preliminary excerpt, aircraft accident, or runway departure. The user's conversation history focuses exclusively on CFD aerodynamic simulations.",
-            "text": "The user's memories contain no record or mention of this NTSB preliminary excerpt, aircraft accident, or runway departure. The user's conversation history focuses exclusively on CFD aerodynamic simulations.",
-            "score": 5.0,
-            "created_at": None,
-            "timestamp": 0,
-            "item_type": "proposition"
-        }]
-
     # 8. Streaming Task Trajectories (DB & ALF Tasks)
     m_stream_task = re.search(r"\b(DB|ALF)\s+task\s+index\s+(\d+)\b", query_text, re.IGNORECASE)
     if m_stream_task and rows:
@@ -984,7 +654,8 @@ def search_hybrid(
     has_code_underscore = bool(re.search(r"\b[a-zA-Z0-9]+_[a-zA-Z0-9_]+\b", query_lower))
     is_code_q = has_code_file or has_code_kw or has_code_underscore
     q_substantive = en_q + (zh_q_bi if zh_q_bi else zh_q_raw_bi)
-    has_engagement_memory = any("订婚" in r["content"] for r in rows)
+    has_engagement_memory = False
+    is_engagement_steps_q = False
     has_spend_match = False
 
     if q_substantive:
@@ -1053,17 +724,8 @@ def search_hybrid(
         query_is_zh = bool(zh_q)
         can_use_dense = bool(DASHSCOPE_API_KEY)
 
-        is_engagement_steps_q = (
-            ("订婚" in query_text or "订婚纪念夜" in query_text)
-            and any(k in query_text for k in ["两步", "哪两步", "步骤", "先后", "想清楚"])
-        )
-        has_engagement_memory = any("订婚" in r["content"] for r in rows)
-
         if is_spend_query and not has_spend_match:
             return make_zero_spend_notice(query_text)
-
-        if is_engagement_steps_q and not has_engagement_memory:
-            return make_unmentioned_notice(query_text)
 
         if not is_code_q and (query_is_zh or not can_use_dense):
             if matched_q == 0 and not has_spend_match and not has_opt_match and not (is_engagement_steps_q and has_engagement_memory):
@@ -1108,7 +770,7 @@ def search_hybrid(
                 return make_unmentioned_notice(query_text)
 
         # Absent Entity Guard (False-premise company/organization/school inquiries):
-        # e.g., "what was Sarah Garcia's job title at Microsoft?" when Microsoft was never mentioned
+        # e.g., "what was X's job title at <company>?" when that company was never mentioned
         m_at_entity = re.search(r"\b(?:at|for|with)\s+([A-Z][a-zA-Z0-9_]{2,})\b", query_text)
         if m_at_entity:
             org = m_at_entity.group(1)
@@ -1154,7 +816,7 @@ def search_hybrid(
                 }]
 
         # Temporal Premise Contradiction Guard:
-        # e.g., "What is Sarah Garcia's birth date in 1985?" when Sarah Garcia was born on 1986-03-26.
+        # e.g., "What is X's birth date in <year>?" when the stored birth year differs.
         m_birth_year_q = re.search(r"\b(?:birth\s*date\s*in|born\s*in)\s*(\d{4})\b", query_lower)
         if m_birth_year_q:
             q_year = m_birth_year_q.group(1)
@@ -1224,26 +886,14 @@ def search_hybrid(
         search_q += " lead leader leadership transitioned team head director"
     if any(k in query_lower for k in ["role", "job", "position", "title", "engineer", "joining", "started working"]):
         search_q += " job title occupation profession role career work employed manager engineer position"
-    if any(k in query_lower for k in ["gpu", "gpus", "falcon", "cluster", "compute"]):
-        search_q += " Falcon cluster GPUs compute upgrade expansion"
     if any(k in query_lower for k in ["drink", "drinks", "beverage", "beverages", "morning drink"]):
         search_q += " drinks beverage tea coffee"
-    if any(k in query_lower for k in ["clinical", "profile", "medical", "max", "retriever", "hip", "dysplasia"]):
-        search_q += " retriever hip dysplasia therapy medical clinical diagnosis"
     if any(k in query_lower for k in ["diet", "dietary", "vegan", "lunch", "dinner", "breakfast", "menu", "restaurant", "catering", "dessert", "eat", "eating", "animal products", "allergy", "seafood", "meat", "shellfish", "oysters", "shrimp", "steak", "chowder"]):
         search_q += " vegan diet allergy shellfish seafood meat animal products restriction"
     if any(k in query_lower for k in ["tech stack", "programming", "languages", "language", "coding", "software", "microservice", "backend", "tooling"]):
         search_q += " programming language software developer stack tooling backend"
     if any(k in query_text for k in ["单位", "什么单位", "在哪个单位", "哪个单位"]):
         search_q += " 单位 公司 部门 岗位 入职"
-    if any(k in query_text for k in ["订婚", "订婚夜", "订婚当晚"]):
-        search_q += " 空白页 职业焦虑 能力短板 短板 写东西"
-    if "dynasty" in query_lower:
-        search_q += " house of royal dynasty"
-    if "serbia" in query_lower and "alexander" in query_lower:
-        search_q += " Obrenović house of Obrenović"
-    if "million" in query_lower and ("home" in query_lower or "house" in query_lower):
-        search_q += " 20 million private island Miami home"
     if clean_options:
         substantive_opts = [opt for opt in clean_options if not any(kw in opt for kw in ABSTAIN_KEYWORDS)]
         if substantive_opts:
@@ -1535,49 +1185,6 @@ def search_hybrid(
 
             synth_items = []
             if not is_past_query:
-                # Synthesize multi-hop answers directly to Rank 1 so the answering model receives the complete deduction
-                if "tarsem" in query_lower:
-                    t_b = [it for it in bridge_items if "tarsem" in it["content"].lower()]
-                    i_u = [it for it in update_items if "india" in it["content"].lower() or "africa" in it["content"].lower()]
-                    if t_b and i_u:
-                        b_clean = re.sub(r"\s*\[[^\]]+\]", "", t_b[0]["content"]).strip()
-                        u_clean = re.sub(r"\s*\[[^\]]+\]", "", i_u[0]["content"]).strip()
-                        synth_text = f"{b_clean}, and {u_clean}."
-                        synth_items.append({
-                            "id": "synth_mquake_tarsem",
-                            "content": synth_text,
-                            "text": synth_text,
-                            "score": 3.5,
-                            "created_at": t_b[0]["created_at"],
-                            "timestamp": t_b[0]["timestamp"]
-                        })
-                elif "portal" in query_lower:
-                    p_b = [it for it in bridge_items if "portal" in it["content"].lower()]
-                    synth_text = "Portal was created by Valve Corporation. Valve Corporation's chief executive officer is Mukesh Ambani. Mukesh Ambani's country of citizenship is Latvia, whose official language is Latvian."
-                    synth_items.append({
-                        "id": "synth_mquake_portal",
-                        "content": synth_text,
-                        "text": synth_text,
-                        "score": 3.5,
-                        "created_at": p_b[0]["created_at"] if p_b else "2026-10-02T00:00:00Z",
-                        "timestamp": p_b[0]["timestamp"] if p_b else 1704153600
-                    })
-                elif "dune" in query_lower or "herbert" in query_lower:
-                    d_b = [it for it in bridge_items if "dune" in it["content"].lower()]
-                    f_u = [it for it in update_items if any(k in it["content"].lower() for k in ["funk", "genre", "herbert"])]
-                    if d_b and f_u:
-                        b_clean = re.sub(r"\s*\[[^\]]+\]", "", d_b[0]["content"]).strip()
-                        u_clean = re.sub(r"\s*\[[^\]]+\]", "", f_u[0]["content"]).strip()
-                        synth_text = f"{b_clean}. {u_clean}."
-                        synth_items.append({
-                            "id": "synth_mquake_dune",
-                            "content": synth_text,
-                            "text": synth_text,
-                            "score": 3.5,
-                            "created_at": d_b[0]["created_at"],
-                            "timestamp": d_b[0]["timestamp"]
-                        })
-
                 # Generalized multi-hop deduction fallback:
                 if not synth_items and update_items and bridge_items:
                     for b in bridge_items:
@@ -1590,7 +1197,7 @@ def search_hybrid(
                                 u_clean = re.sub(r"\s*\[[^\]]+\]", "", u["content"]).strip()
                                 synth_text = f"{b_clean}. {u_clean}."
                                 synth_items.append({
-                                    "id": "synth_mquake_gen",
+                                    "id": f"derived_{b.get('id', 'b')}_{u.get('id', 'u')}",
                                     "content": synth_text,
                                     "text": synth_text,
                                     "score": 3.5,
@@ -1700,10 +1307,6 @@ def search_hybrid(
                 elif re.search(rf"\b(?:in|on|of|during)\s+(?:[A-Za-z]+\s+)?{target_year}\b", content, re.IGNORECASE):
                     base_score += 2.00
 
-            # Chinese Medical Symptom Prioritization (e.g. 晨僵)
-            if "晨僵" in query_text and "晨僵" in content:
-                base_score += 2.00
-
             # MCQ Option Term Reinforcement
             if clean_options:
                 for opt in clean_options:
@@ -1769,41 +1372,6 @@ def search_hybrid(
                     elif any(w in query_lower for w in ["warm-up", "basketball", "game", "sports", "workout"]) and any(w in content_lower for w in ["sports injury", "injury", "physiotherapy", "ligament", "trail"]):
                         base_score += 2.20
 
-            # Medical Contraindication Avoidance vs Recommended Alternative
-            if any(k in query_lower for k in ["外用", "药膏", "凝胶", "乳膏", "冷敷", "冰敷"]):
-                has_ice_stretch = any(k in content_lower for k in ["冰敷", "冷敷"]) and any(k in content_lower for k in ["伸展", "轻柔的伸展", "伸展大腿前侧"])
-                has_voltaren_reaction = any(k in content_lower for k in ["扶他林", "双氯芬酸"]) and any(k in content_lower for k in ["过敏", "外用", "皮肤反应", "发红", "停了外用药", "停一下"])
-                if has_ice_stretch:
-                    base_score += 3.00
-                elif any(k in content_lower for k in ["冰敷", "冷敷", "伸展"]):
-                    base_score += 1.80
-                if has_voltaren_reaction:
-                    base_score += 2.80
-                elif any(k in content_lower for k in ["过敏", "双氯芬酸", "扶他林", "皮肤反应"]):
-                    base_score += 1.50
-                # Suppress purely gastrointestinal/stomach turns when question is specifically about topical knee care
-                if any(k in content_lower for k in ["胃胀", "顶胀", "烧心", "胃溃疡", "排空速度"]) and not has_ice_stretch and not has_voltaren_reaction:
-                    base_score *= 0.20
-
-            # Medical Prescribed Drug Name boost
-            if any(k in query_lower for k in ["具体药物", "药物名称", "开具的具体药物", "开具的药物", "开的药", "什么药", "处方"]):
-                if any(k in content_lower for k in ["塞来昔布", "celecoxib", "200mg"]):
-                    base_score += 3.50
-                elif any(k in content_lower for k in ["华法林", "warfarin", "prescribed", "开具", "口服"]):
-                    base_score += 1.80
-
-            # Morning Stiffness Duration (晨僵时长)
-            if any(k in query_lower for k in ["晨僵", "僵硬", "stiffness"]):
-                if "[context before]" in content_lower:
-                    base_score -= 1.00
-                if any(k in content_lower for k in ["15分钟", "10分钟", "晨僵也变成", "晨僵从之前"]):
-                    base_score += 2.20
-
-            # INR Checkup Timing
-            if "inr" in query_lower:
-                if any(k in content_lower for k in ["半个月前", "复查一次", "最近一次"]):
-                    base_score += 2.00
-
             # Proposition and rich visual memory preference boost (scaled by relevance)
             if item_type == "proposition":
                 base_score += (0.28 * rel_factor)
@@ -1812,26 +1380,9 @@ def search_hybrid(
 
             # Sequential connector bonus for multi-step questions
             if any(k in query_text for k in ["先后", "哪两步", "两步", "顺序", "两件事", "哪两", "第一步", "第二步"]):
-                if any(k in content for k in ["顺序为", "先是", "然后", "先后", "两步", "拆成", "清单", "先被", "开始在", "空白页"]):
+                if any(k in content for k in ["顺序为", "先是", "然后", "先后", "两步", "拆成", "清单", "先被", "开始在"]):
                     base_score += (0.35 * rel_factor)
             
-            # Engagement night relational reasoning bonus: ensure both concrete action steps are retrieved
-            if any(k in query_text for k in ["订婚纪念夜", "订婚", "订婚夜", "订婚当晚"]):
-                if any(k in content for k in ["聊天界面的截图", "稳步进阶", "小群(7)", "群成员共7人"]):
-                    base_score -= 0.60
-                elif any(k in content for k in ["订婚", "2024-01-02", "空白页", "棘手项目"]):
-                    if any(k in content for k in ["空白页", "职业焦虑和能力短板", "两个词", "开始在空白页"]):
-                        base_score += 0.85
-                    if any(k in content for k in ["短板包括", "行业政策理解", "数据分析", "团队沟通", "对应到那些短板", "翻出了以前做过的棘手项目", "把职业焦虑拆成具体短板"]):
-                        base_score += 0.85
-                    if item_type == "proposition" and any(k in query_text for k in ["先后", "两步", "哪两步"]):
-                        base_score += 0.40
-
-            # 20 million Miami home bonus for biographical queries
-            if "million" in query_lower and any(k in query_lower for k in ["home", "house", "build", "built", "island", "miami"]):
-                if "20 million" in content_lower and any(k in content_lower for k in ["home", "house", "island", "miami", "private island"]):
-                    base_score += 0.85
-
             # Conflict governance & Persona Constraints
             is_constraint_mem = "[strict constraint]" in content_lower or "[constraint]" in content_lower
             if is_constraint_mem:
@@ -2404,13 +1955,7 @@ def search_hybrid(
                 if len(target_categories) > 1 or any(k in query_lower for k in ["both", "combined"]):
                     deduped = relevant_purchases[:max(2, len(target_categories))]
                 else:
-                    top_pur = dict(relevant_purchases[0])
-                    c_low = top_pur["content"].lower()
-                    if ("pour-over" in c_low or "pour over" in c_low or "twenty-five" in c_low or "25" in c_low) and any(k in query_lower for k in ["coffee maker", "coffee makers", "coffee"]):
-                        top_pur["content"] = "Total amount spent on coffee makers: $25.00. User purchased a basic pour-over kit (coffee maker) for $25.00. [Conversation Date: 2024-05-04]"
-                        top_pur["text"] = top_pur["content"]
-                        top_pur["score"] = 4.8
-                    deduped = [top_pur]
+                    deduped = [relevant_purchases[0]]
             else:
                 return make_zero_spend_notice(query_text)
         else:
@@ -2634,155 +2179,11 @@ def search_hybrid(
             coding_items = other_coding_items
             coding_items.sort(key=lambda x: x.get("score", 0), reverse=True)
 
-        is_timeseries_context = "timeseries" in query_lower or any("timeseries" in r["content"].lower() for r in rows)
-        is_timeseries_fix_q = (
-            any(k in query_lower for k in ["_check_required_columns", "autocheck_required_columns", "timeseries core",
-                                           "required column", "required_columns", "misleading exception",
-                                           "missing required column", "13009", "13033"])
-            or (is_timeseries_context and any(k in query_lower for k in ["required column", "required_columns",
-                                                                         "core.py", "valueerror", "colnames",
-                                                                         "missing", "invalid", "exception",
-                                                                         "check", "patch", "fix", "test_sampled",
-                                                                         "test_required"]))
-        )
-        if is_timeseries_fix_q:
-            # Precise fix specification from astropy PR #13033 (fixes issue #13009)
-            # The SWE-bench agent needs this exact information to write code that passes pytest
-            fix_diff_prop = {
-                "id": "fix_timeseries_13033_diff",
-                "session_id": coding_items[0].get("session_id") if coding_items else "timeseries_fix",
-                "content": (
-                    "Fix for astropy issue #13009 (PR #13033): TimeSeries misleading exception when required column check fails.\n"
-                    "File: astropy/timeseries/core.py\n"
-                    "In BaseTimeSeries._check_required_columns, add a helper function inside the method:\n\n"
-                    "    def _check_required_columns(self):\n"
-                    "        def as_scalar_or_list_str(obj):\n"
-                    "            if not hasattr(obj, '__len__'):\n"
-                    "                return f\"'{obj}'\"\n"
-                    "            elif len(obj) == 1:\n"
-                    "                return f\"'{obj[0]}'\"\n"
-                    "            else:\n"
-                    "                return str(obj)\n\n"
-                    "Then change the ValueError raise (around line 78-80) from:\n"
-                    '    raise ValueError("{} object is invalid - expected \'{}\' "\n'
-                    '                     "as the first column{} but found \'{}\'"\n'
-                    '                     .format(self.__class__.__name__, required_columns[0], plural, self.colnames[0]))\n\n'
-                    "To:\n"
-                    '    raise ValueError("{} object is invalid - expected {} "\n'
-                    '                     "as the first column{} but found {}"\n'
-                    '                     .format(self.__class__.__name__, as_scalar_or_list_str(required_columns),\n'
-                    '                                plural, as_scalar_or_list_str(self.colnames[:len(required_columns)])))\n'
-                ),
-                "text": (
-                    "Fix for astropy issue #13009 (PR #13033): TimeSeries misleading exception when required column check fails.\n"
-                    "File: astropy/timeseries/core.py\n"
-                    "In BaseTimeSeries._check_required_columns, add a helper function inside the method:\n\n"
-                    "    def _check_required_columns(self):\n"
-                    "        def as_scalar_or_list_str(obj):\n"
-                    "            if not hasattr(obj, '__len__'):\n"
-                    "                return f\"'{obj}'\"\n"
-                    "            elif len(obj) == 1:\n"
-                    "                return f\"'{obj[0]}'\"\n"
-                    "            else:\n"
-                    "                return str(obj)\n\n"
-                    "Then change the ValueError raise (around line 78-80) from:\n"
-                    '    raise ValueError("{} object is invalid - expected \'{}\' "\n'
-                    '                     "as the first column{} but found \'{}\'"\n'
-                    '                     .format(self.__class__.__name__, required_columns[0], plural, self.colnames[0]))\n\n'
-                    "To:\n"
-                    '    raise ValueError("{} object is invalid - expected {} "\n'
-                    '                     "as the first column{} but found {}"\n'
-                    '                     .format(self.__class__.__name__, as_scalar_or_list_str(required_columns),\n'
-                    '                                plural, as_scalar_or_list_str(self.colnames[:len(required_columns)])))\n'
-                ),
-                "score": 3.0,
-                "created_at": None,
-                "timestamp": 0,
-                "item_type": "proposition"
-            }
-            fix_test_prop = {
-                "id": "fix_timeseries_13033_test",
-                "session_id": coding_items[0].get("session_id") if coding_items else "timeseries_fix",
-                "content": (
-                    "Test specification for astropy issue #13009 fix (PR #13033).\n"
-                    "File: astropy/timeseries/tests/test_sampled.py\n"
-                    "In test_required_columns(), add after the existing 'banana' assertion:\n\n"
-                    "    # https://github.com/astropy/astropy/issues/13009\n"
-                    "    ts_2cols_required = ts.copy()\n"
-                    "    ts_2cols_required._required_columns = ['time', 'a']\n"
-                    "    with pytest.raises(ValueError) as exc:\n"
-                    "        ts_2cols_required.remove_column('a')\n"
-                    "    assert exc.value.args[0] == (\"TimeSeries object is invalid - expected \"\n"
-                    "                                 \"['time', 'a'] as the first columns but found ['time', 'b']\")\n\n"
-                    "Existing test assertion that must still pass:\n"
-                    "    assert exc.value.args[0] == (\"TimeSeries object is invalid - expected \"\n"
-                    "                                 \"'time' as the first column but found 'banana'\")\n"
-                    "Note: single column uses 'time' (scalar string), multiple columns uses ['time', 'a'] (list repr)."
-                ),
-                "text": (
-                    "Test specification for astropy issue #13009 fix (PR #13033).\n"
-                    "File: astropy/timeseries/tests/test_sampled.py\n"
-                    "In test_required_columns(), add after the existing 'banana' assertion:\n\n"
-                    "    # https://github.com/astropy/astropy/issues/13009\n"
-                    "    ts_2cols_required = ts.copy()\n"
-                    "    ts_2cols_required._required_columns = ['time', 'a']\n"
-                    "    with pytest.raises(ValueError) as exc:\n"
-                    "        ts_2cols_required.remove_column('a')\n"
-                    "    assert exc.value.args[0] == (\"TimeSeries object is invalid - expected \"\n"
-                    "                                 \"['time', 'a'] as the first columns but found ['time', 'b']\")\n\n"
-                    "Existing test assertion that must still pass:\n"
-                    "    assert exc.value.args[0] == (\"TimeSeries object is invalid - expected \"\n"
-                    "                                 \"'time' as the first column but found 'banana'\")\n"
-                    "Note: single column uses 'time' (scalar string), multiple columns uses ['time', 'a'] (list repr)."
-                ),
-                "score": 2.9,
-                "created_at": None,
-                "timestamp": 0,
-                "item_type": "proposition"
-            }
-            fix_context_prop = {
-                "id": "fix_timeseries_13033_context",
-                "session_id": coding_items[0].get("session_id") if coding_items else "timeseries_fix",
-                "content": (
-                    "Context: astropy/timeseries/core.py - BaseTimeSeries._check_required_columns method.\n"
-                    "The bug is in the ValueError format string at line ~78-80.\n"
-                    "Original code uses required_columns[0] and self.colnames[0] which only shows\n"
-                    "the first column, producing misleading messages like:\n"
-                    "  'expected time as the first columns but found time'\n"
-                    "when the real issue is a different column (e.g. 'a') is missing.\n"
-                    "The fix replaces single-element indexing with as_scalar_or_list_str() which\n"
-                    "shows all required columns, correctly producing:\n"
-                    "  \"expected ['time', 'a'] as the first columns but found ['time', 'b']\"\n"
-                    "Key: Do NOT change any other part of _check_required_columns logic.\n"
-                    "Only modify the ValueError format string and add the helper function."
-                ),
-                "text": (
-                    "Context: astropy/timeseries/core.py - BaseTimeSeries._check_required_columns method.\n"
-                    "The bug is in the ValueError format string at line ~78-80.\n"
-                    "Original code uses required_columns[0] and self.colnames[0] which only shows\n"
-                    "the first column, producing misleading messages like:\n"
-                    "  'expected time as the first columns but found time'\n"
-                    "when the real issue is a different column (e.g. 'a') is missing.\n"
-                    "The fix replaces single-element indexing with as_scalar_or_list_str() which\n"
-                    "shows all required columns, correctly producing:\n"
-                    "  \"expected ['time', 'a'] as the first columns but found ['time', 'b']\"\n"
-                    "Key: Do NOT change any other part of _check_required_columns logic.\n"
-                    "Only modify the ValueError format string and add the helper function."
-                ),
-                "score": 2.8,
-                "created_at": None,
-                "timestamp": 0,
-                "item_type": "proposition"
-            }
-            coding_items = [fix_diff_prop, fix_test_prop, fix_context_prop] + [
-                it for it in coding_items
-                if not any(k in it["content"] for k in ["binned.py", "TIME_SIZE_COLUMN", "time_bin_size"])
-            ]
 
         # Atomic Session Bundling: If top candidate has a session_id, prioritize co-retrieving
         # related test and code patches from the same session/task within the budget.
         target_session = coding_items[0].get("session_id") if coding_items else None
-        if target_session and not is_timeseries_fix_q:
+        if target_session:
             same_session_items = [it for it in coding_items if it.get("session_id") == target_session]
             diff_session_items = [it for it in coding_items if it.get("session_id") != target_session]
             coding_items = same_session_items + diff_session_items
@@ -2838,74 +2239,7 @@ def search_hybrid(
         or bool(re.search(r"\bfirst\b[\s\S]*?\bthen\b", query_lower))
         or bool(re.search(r"\bin (?:what |which )?(?:order|sequence)\b", query_lower))
     )
-    # Engagement night sequential two-step prioritization:
-    is_ethos_water_q = "ethos water" in query_lower and any(k in query_lower for k in ["background", "color", "pour"])
-    if is_ethos_water_q:
-        ethos_prop_bg = {
-            "id": "prop_ethos_water_bg",
-            "content": "In the original image of the Starbucks Ethos Water 'heart-shaped pour' ad, the background color is white. The background description matching the original image is: A. White. [Conversation Date: 2024-01-22]",
-            "text": "In the original image of the Starbucks Ethos Water 'heart-shaped pour' ad, the background color is white. The background description matching the original image is: A. White. [Conversation Date: 2024-01-22]",
-            "score": 4.8,
-            "created_at": "2024-01-22T00:00:00Z",
-            "timestamp": 1705881600,
-            "item_type": "proposition"
-        }
-        ethos_prop_visual = {
-            "id": "prop_ethos_water_visual",
-            "content": "[Visual Content] The image features a bottle of Ethos Water, with water pouring out to form a heart shape, symbolizing care and support. The text explains that purchasing Ethos Water at Starbucks contributes 5 cents to the Ethos Water Fund, aiding those in need of clean water. The background is white, with dominant colors being blue from the water and green from the Starbucks logo in the top right corner. [Conversation Date: 2024-01-22]",
-            "text": "[Visual Content] The image features a bottle of Ethos Water, with water pouring out to form a heart shape, symbolizing care and support. The text explains that purchasing Ethos Water at Starbucks contributes 5 cents to the Ethos Water Fund, aiding those in need of clean water. The background is white, with dominant colors being blue from the water and green from the Starbucks logo in the top right corner. [Conversation Date: 2024-01-22]",
-            "score": 4.5,
-            "created_at": "2024-01-22T00:00:00Z",
-            "timestamp": 1705881605,
-            "item_type": "proposition"
-        }
-        ethos_prop_dialogue = {
-            "id": "prop_ethos_water_dialogue",
-            "content": "Alex Mercer questioned whether the Starbucks Ethos Water heart shaped pour piece belongs in the red background bucket. The assistant confirmed to check the original image where the background is white, not red. [Conversation Date: 2024-01-24]",
-            "text": "Alex Mercer questioned whether the Starbucks Ethos Water heart shaped pour piece belongs in the red background bucket. The assistant confirmed to check the original image where the background is white, not red. [Conversation Date: 2024-01-24]",
-            "score": 4.0,
-            "created_at": "2024-01-24T00:00:00Z",
-            "timestamp": 1706054400,
-            "item_type": "proposition"
-        }
-        final_items = [ethos_prop_bg, ethos_prop_visual, ethos_prop_dialogue]
-
-    # Engagement night sequential two-step prioritization:
-    # Ensure Step 1 (blank page two words) and Step 2 (past tricky projects & transition) are cleanly placed at Rank 1 and Rank 2.
-    is_engagement_steps_q = (
-        ("订婚" in query_text or "订婚纪念夜" in query_text)
-        and any(k in query_text for k in ["两步", "哪两步", "步骤", "先后", "想清楚"])
-    )
-    if is_engagement_steps_q:
-        step_summary = {
-            "id": "eng_step_summary",
-            "content": "订婚纪念夜那晚，我面对职业焦虑先后做了两步：第一步，在空白页上写下“职业焦虑”和“能力短板”两个词；第二步，翻出以前做过的一些棘手项目，逐一对应到那些能力短板上，借此把职业焦虑慢慢想清楚。 [Conversation Date: 2024-01-02]",
-            "text": "订婚纪念夜那晚，我面对职业焦虑先后做了两步：第一步，在空白页上写下“职业焦虑”和“能力短板”两个词；第二步，翻出以前做过的一些棘手项目，逐一对应到那些能力短板上，借此把职业焦虑慢慢想清楚。 [Conversation Date: 2024-01-02]",
-            "score": 4.5,
-            "created_at": "2024-01-02T00:19:00Z",
-            "timestamp": 1704153600,
-            "item_type": "proposition"
-        }
-        step1_raw = {
-            "id": "eng_step1_raw",
-            "content": "王景川: 后来我真的开始在空白页上写东西了。先写了两个词，职业焦虑和能力短板。写下去以后，思路反而慢慢清楚了。列出来的主要是行业政策理解、数据分析，还有团队沟通。 [Conversation Date: 2024-01-02]",
-            "text": "王景川: 后来我真的开始在空白页上写东西了。先写了两个词，职业焦虑和能力短板。写下去以后，思路反而慢慢清楚了。列出来的主要是行业政策理解、数据分析，还有团队沟通。 [Conversation Date: 2024-01-02]",
-            "score": 3.8,
-            "created_at": "2024-01-02T00:19:10Z",
-            "timestamp": 1704153610,
-            "item_type": "proposition"
-        }
-        step2_raw = {
-            "id": "eng_step2_raw",
-            "content": "助手: 也就是说，你那晚其实是从“我为什么停住了”转向“我到底缺什么、该补什么”。\n王景川: 对，而且我还把以前做过的一些棘手项目也翻出来了。越看越觉得，很多问题都能对应到那些短板上。 [Conversation Date: 2024-01-02]",
-            "text": "助手: 也就是说，你那晚其实是从“我为什么停住了”转向“我到底缺什么、该补什么”。\n王景川: 对，而且我还把以前做过的一些棘手项目也翻出来了。越看越觉得，很多问题都能对应到那些短板上。 [Conversation Date: 2024-01-02]",
-            "score": 3.6,
-            "created_at": "2024-01-02T00:19:20Z",
-            "timestamp": 1704153620,
-            "item_type": "proposition"
-        }
-        final_items = [step_summary, step1_raw, step2_raw]
-    elif is_temporal_sequence_q and len(final_items) > 1:
+    if is_temporal_sequence_q and len(final_items) > 1:
         final_items.sort(key=lambda x: (x.get("timestamp") is None, x.get("timestamp") or 0))
 
     # Clean Output Presentation:
