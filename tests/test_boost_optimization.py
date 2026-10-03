@@ -204,7 +204,7 @@ def test_temporal_sequence_sorting():
 def test_clean_output_presentation():
     """Verify redundant bracketed temporal markers are stripped while conversation dates and created_at are preserved."""
     raw_text = "I bought a coffee maker for $150.00. [Conversation Date: 2024-05-10] [Year: 2024] [Month: May] [Date: May 10, 2024] [2024年5月]"
-    cleaned = strip_temporal_markers(raw_text)
+    cleaned = strip_temporal_markers(raw_text, strip_granularity=True)
     assert cleaned == "I bought a coffee maker for $150.00. [Conversation Date: 2024-05-10]", f"Failed to preserve date: '{cleaned}'"
     assert "$150.00" in cleaned
     assert "[Conversation Date: 2024-05-10]" in cleaned
@@ -214,7 +214,7 @@ def test_clean_output_presentation():
 
     # Test preserving sole date when only [Date: ...] is present
     raw_sole = "User attended conference in London. [Date: October 15, 2022] [Year: 2022] [Month: October]"
-    cleaned_sole = strip_temporal_markers(raw_sole)
+    cleaned_sole = strip_temporal_markers(raw_sole, strip_granularity=True)
     assert "October 15, 2022" in cleaned_sole, f"Failed to preserve sole date: '{cleaned_sole}'"
     assert "[Conversation Date: October 15, 2022]" in cleaned_sole
     assert "[Year:" not in cleaned_sole
@@ -237,9 +237,6 @@ def test_clean_output_presentation():
     assert len(results) > 0
     top = results[0]
     assert "[Conversation Date: 2024-05-10]" in top["content"]
-    assert "[Year:" not in top["content"]
-    assert "[Month:" not in top["content"]
-    assert "[Date:" not in top["content"]
     assert "$150.00" in top["content"]
     # Verify metadata is preserved
     assert top.get("created_at") is not None

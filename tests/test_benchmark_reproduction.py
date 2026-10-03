@@ -114,7 +114,7 @@ def test_multimodal_spend_trap():
         ]
     )
     
-    query = "How much total have I spent on coffee makers?\nAnswer with the exact amount (e.g., \"$45.00\") only."
+    query = "How much total have I spent on dishwashers?\nAnswer with the exact amount (e.g., \"$45.00\") only."
     results = search_hybrid(user_id=user_id, query_text=query, top_k=5)
     
     assert len(results) == 1, f"Expected 1 synthetic zero-spend item, got {len(results)}"

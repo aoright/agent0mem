@@ -160,7 +160,7 @@ def search_memory(req: SearchRequest):
             created_at = c.get("created_at")
             if created_at and "[Conversation Date:" not in c_content and "[Event Date:" not in c_content:
                 date_part = created_at.split("T")[0] if "T" in str(created_at) else str(created_at).split()[0]
-                if re.match(r"^\d{4}-\d{2}-\d{2}$", date_part) and date_part < "2026-01-01":
+                if re.match(r"^\d{4}-\d{2}-\d{2}$", date_part):
                     c_content = f"{c_content} [Conversation Date: {date_part}]"
                     c_text = f"{c_text} [Conversation Date: {date_part}]"
 

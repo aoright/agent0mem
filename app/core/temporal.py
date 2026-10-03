@@ -182,7 +182,7 @@ def enrich_temporal_text(text: str, base_sec: Optional[float], has_real_ts: bool
     return text
 
 
-def strip_temporal_markers(text: str) -> str:
+def strip_temporal_markers(text: str, strip_granularity: bool = False) -> str:
     """Clean redundant duplicated temporal markers while strictly preserving conversation dates, event dates, years, months, and relative time expressions."""
     if not text:
         return text
@@ -190,12 +190,13 @@ def strip_temporal_markers(text: str) -> str:
     has_explicit_date = bool(re.search(r"\[(?:Conversation Date|Event Date):\s*[^\]]+\]", text))
     if has_explicit_date:
         cleaned = re.sub(r"\[Date:\s*[^\]]+\]", "", text)
-        cleaned = re.sub(r"\[Year:\s*[^\]]+\]", "", cleaned)
-        cleaned = re.sub(r"\[Month:\s*[^\]]+\]", "", cleaned)
-        cleaned = re.sub(r"\[\d{4}年\d{1,2}月(?:\d{1,2}日)?\]", "", cleaned)
+        if strip_granularity:
+            cleaned = re.sub(r"\[Year:\s*[^\]]+\]", "", cleaned)
+            cleaned = re.sub(r"\[Month:\s*[^\]]+\]", "", cleaned)
+            cleaned = re.sub(r"\[\d{4}年\d{1,2}月(?:\d{1,2}日)?\]", "", cleaned)
     else:
         cleaned = re.sub(r"\[Date:\s*([^\]]+)\]", r"[Conversation Date: \1]", text)
-        if re.search(r"\[Conversation Date:\s*[^\]]+\]", cleaned):
+        if strip_granularity and re.search(r"\[Conversation Date:\s*[^\]]+\]", cleaned):
             cleaned = re.sub(r"\[Year:\s*[^\]]+\]", "", cleaned)
             cleaned = re.sub(r"\[Month:\s*[^\]]+\]", "", cleaned)
             cleaned = re.sub(r"\[\d{4}年\d{1,2}月(?:\d{1,2}日)?\]", "", cleaned)
