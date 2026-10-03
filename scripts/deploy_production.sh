@@ -70,8 +70,8 @@ echo "[6/6] Verifying public endpoint and syncing drain service ${DRAIN_SERVICE}
 ssh -o StrictHostKeyChecking=no -i "${SSH_KEY}" "${REMOTE_HOST}" "
   curl -s http://47.97.127.223/agent0mem/health
   echo ''
-  echo 'Draining in-flight requests on ${DRAIN_SERVICE} (3s)...'
-  sleep 3
+  echo 'Draining in-flight requests on ${DRAIN_SERVICE} (8s)...'
+  sleep 8
   systemctl restart ${DRAIN_SERVICE}
   sleep 2
   systemctl is-active ${DRAIN_SERVICE}
