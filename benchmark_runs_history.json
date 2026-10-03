@@ -7396,5 +7396,59 @@
       ],
       "media_transport": "inline_data_uri"
     }
+  },
+  {
+    "timestamp": "2026-10-03T08:02:03.901830",
+    "evaluation_id": "teval_40f356c3f5383103",
+    "track": "multimodal",
+    "score_data": {
+      "score": 0.8076923076923077,
+      "completed": 13,
+      "total": 13,
+      "capabilities": [
+        {
+          "count": 3,
+          "id": "retrieval",
+          "score": 0.5
+        },
+        {
+          "count": 1,
+          "id": "relational_reasoning",
+          "score": 0.0
+        },
+        {
+          "count": 9,
+          "id": "evidence_governance",
+          "score": 1.0
+        }
+      ],
+      "subcapabilities": [
+        {
+          "capability_id": "retrieval",
+          "count": 1,
+          "id": "direct_recall",
+          "score": 0.0
+        },
+        {
+          "capability_id": "retrieval",
+          "count": 2,
+          "id": "atomic_retrieval",
+          "score": 0.75
+        },
+        {
+          "capability_id": "relational_reasoning",
+          "count": 1,
+          "id": "multi_session_reasoning",
+          "score": 0.0
+        },
+        {
+          "capability_id": "evidence_governance",
+          "count": 9,
+          "id": "abstention",
+          "score": 1.0
+        }
+      ],
+      "media_transport": "inline_data_uri"
+    }
   }
 ]
