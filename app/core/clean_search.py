@@ -18,11 +18,18 @@ from __future__ import annotations
 
 import json
 import re
+import threading
+from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
+try:  # optional acceleration; results are identical up to float rounding
+    import numpy as _np
+except ImportError:  # pragma: no cover
+    _np = None
+
 from app.core.bm25 import BM25Index
-from app.core.embeddings import cosine_similarity, get_embeddings
+from app.core.embeddings import cosine_similarity, decode_vector, get_embeddings
 
 RRF_K = 60
 DEFAULT_MAX_ITEMS = 40
@@ -30,6 +37,17 @@ DEFAULT_BYTE_BUDGET = 24_000
 NEIGHBOUR_WINDOW = 1
 
 _MARKER_RE = re.compile(r"\s*\[(?:Conversation Date|Year|Month|Date|Event Time|Relative Time)[^\]]*\]")
+
+
+def _fmt_day(day: str, style: str) -> str:
+    """Render YYYY-MM-DD either as-is or as '20 May 2023 (Saturday)'."""
+    if style != "human" or not day:
+        return day
+    try:
+        d = datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        return day
+    return f"{d.day} {d.strftime('%B %Y')} ({d.strftime('%A')})"
 
 
 def _day(ts: Optional[int], created_at: Optional[str]) -> str:
@@ -105,33 +123,84 @@ def _load_vectors(ids: List[str]) -> Dict[str, List[float]]:
             batch = ids[i:i + 500]
             ph = ",".join("?" * len(batch))
             for r in conn.execute(f"SELECT memory_id, vector FROM embeddings WHERE memory_id IN ({ph})", batch):
-                if r["vector"]:
-                    try:
-                        out[r["memory_id"]] = json.loads(r["vector"])
-                    except ValueError:
-                        pass
+                v = decode_vector(r["vector"])
+                if v:
+                    out[r["memory_id"]] = v
     return out
 
 
-def clean_search(user_id: str, query: str, top_k: int = 100,
-                 max_items: int = DEFAULT_MAX_ITEMS, byte_budget: int = DEFAULT_BYTE_BUDGET) -> List[dict]:
-    rows = _load_rows(user_id)
-    if not rows:
-        return []
-    by_id = {r["memory_id"]: r for r in rows}
+_INDEX_CACHE: "OrderedDict[str, tuple]" = OrderedDict()
+_INDEX_CACHE_MAX = 64
+_INDEX_LOCK = threading.Lock()
 
-    # Lexical ranking
+
+def _user_key(user_id: str) -> tuple:
+    from app.database import get_db
+
+    with get_db() as conn:
+        row = conn.execute("SELECT COUNT(*), MAX(id) FROM memories WHERE user_id = ?", (user_id,)).fetchone()
+    return (row[0], row[1])
+
+
+def _build_index(user_id: str) -> tuple:
+    rows = _load_rows(user_id)
+    by_id = {r["memory_id"]: r for r in rows}
     bm25 = BM25Index()
     bm25.fit([(r["memory_id"], _clean(r["content"])) for r in rows])
+    vecs = _load_vectors(list(by_id)) if rows else {}
+    ids = list(vecs)
+    mat = None
+    if ids and _np is not None:
+        m = _np.asarray([vecs[i] for i in ids], dtype=_np.float32)
+        norms = _np.linalg.norm(m, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        mat = m / norms
+    return rows, by_id, bm25, ids, mat, vecs
+
+
+def _get_index(user_id: str) -> tuple:
+    """Cached per-user index. The key changes on every insert, so a search right after
+    a successful /add always sees the new memories."""
+    key = _user_key(user_id)
+    with _INDEX_LOCK:
+        hit = _INDEX_CACHE.get(user_id)
+        if hit and hit[0] == key:
+            _INDEX_CACHE.move_to_end(user_id)
+            return hit[1]
+    idx = _build_index(user_id)
+    with _INDEX_LOCK:
+        _INDEX_CACHE[user_id] = (key, idx)
+        _INDEX_CACHE.move_to_end(user_id)
+        while len(_INDEX_CACHE) > _INDEX_CACHE_MAX:
+            _INDEX_CACHE.popitem(last=False)
+    return idx
+
+
+def clean_search(user_id: str, query: str, top_k: int = 100,
+                 max_items: int = DEFAULT_MAX_ITEMS, byte_budget: int = DEFAULT_BYTE_BUDGET,
+                 order: str = "score", date_style: str = "iso") -> List[dict]:
+    """order: 'score' (fused relevance) or 'time' (selected items re-sorted chronologically).
+    date_style: 'iso' -> '[2023-05-20]', 'human' -> '[Said on 20 May 2023 (Saturday)]'."""
+    rows, by_id, bm25, vec_ids, vec_mat, vecs = _get_index(user_id)
+    if not rows:
+        return []
+
+    # Lexical ranking
     lex = [mid for mid, s in sorted(bm25.score(query), key=lambda x: x[1], reverse=True) if s > 0]
 
     # Dense ranking
     dense: List[str] = []
-    qv = (get_embeddings([query]) or [None])[0]
+    qv = (get_embeddings([query]) or [None])[0] if vec_ids else None
     if qv:
-        vecs = _load_vectors(list(by_id))
-        sims = [(mid, cosine_similarity(qv, v)) for mid, v in vecs.items()]
-        dense = [mid for mid, _ in sorted(sims, key=lambda x: x[1], reverse=True)]
+        if vec_mat is not None:
+            q = _np.asarray(qv, dtype=_np.float32)
+            qn = float(_np.linalg.norm(q)) or 1.0
+            sims = vec_mat @ (q / qn)
+            order_idx = _np.argsort(-sims, kind="stable")
+            dense = [vec_ids[i] for i in order_idx]
+        else:
+            sims_l = [(mid, cosine_similarity(qv, vecs[mid])) for mid in vec_ids]
+            dense = [mid for mid, _ in sorted(sims_l, key=lambda x: x[1], reverse=True)]
 
     # Reciprocal rank fusion
     fused: Dict[str, float] = {}
@@ -175,7 +244,10 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             continue
         seen_text.add(key)
         day = _day(r["timestamp"], r["created_at"])
-        content = f"[{day}] {body}" if day else body
+        if day and date_style == "human":
+            content = f"[Said on {_fmt_day(day, 'human')}] {body}"
+        else:
+            content = f"[{day}] {body}" if day else body
         size = len(content.encode("utf-8"))
         if total + size > byte_budget and out:
             break
@@ -188,4 +260,6 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             "created_at": r["created_at"],
             "timestamp": r["timestamp"],
         })
+    if order == "time":
+        out.sort(key=lambda it: (float(it.get("timestamp") or 0), it["id"]))
     return out

@@ -30,6 +30,36 @@ def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
     return dot / (math.sqrt(norm1) * math.sqrt(norm2))
 
 
+_F16_MAGIC = b"F16:"
+
+
+def encode_vector(vec: List[float]) -> bytes:
+    """Pack an embedding as little-endian float16 (2 bytes per dimension)."""
+    import struct
+    return _F16_MAGIC + struct.pack(f"<{len(vec)}e", *vec)
+
+
+def decode_vector(raw) -> Optional[List[float]]:
+    """Decode a stored vector: float16 blob (new) or JSON text (legacy rows)."""
+    if raw is None:
+        return None
+    if isinstance(raw, (bytes, bytearray, memoryview)):
+        b = bytes(raw)
+        if b.startswith(_F16_MAGIC):
+            import struct
+            body = b[len(_F16_MAGIC):]
+            return list(struct.unpack(f"<{len(body) // 2}e", body))
+        try:
+            raw = b.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+    try:
+        v = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return v if isinstance(v, list) else None
+
+
 def get_embeddings(texts: List[str]) -> List[Optional[List[float]]]:
     """Fetch text-embedding-v3 embeddings from DashScope with caching and retries."""
     if not texts:
@@ -76,8 +106,10 @@ def get_embeddings(texts: List[str]) -> List[Optional[List[float]]]:
             "Content-Type": "application/json"
         }
 
-        # Retry with exponential backoff up to 3 times
-        for attempt in range(3):
+        # Retry with backoff; rate limiting (HTTP 429) gets a longer wait so that a burst
+        # does not silently degrade search to lexical-only.
+        for attempt in range(5):
+            throttled = False
             req = urllib.request.Request(DASHSCOPE_EMBED_URL, data=payload, headers=headers, method="POST")
             try:
                 with urllib.request.urlopen(req, timeout=15.0) as resp:
@@ -96,10 +128,11 @@ def get_embeddings(texts: List[str]) -> List[Optional[List[float]]]:
                         logger.warning(f"DashScope embeddings attempt {attempt + 1} HTTP {resp.status}")
             except urllib.error.HTTPError as e:
                 err_msg = e.read().decode("utf-8", errors="ignore")
+                throttled = e.code == 429
                 logger.warning(f"DashScope embeddings attempt {attempt + 1} HTTP {e.code}: {err_msg}")
             except Exception as e:
                 logger.warning(f"DashScope embeddings attempt {attempt + 1} error: {str(e)}")
-            time.sleep(0.3 * (attempt + 1))
+            time.sleep((1.0 * 2 ** attempt) if throttled else 0.3 * (attempt + 1))
 
         logger.error(f"Failed to generate embeddings after retries for batch {batch_num}")
         return False

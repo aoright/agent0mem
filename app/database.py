@@ -20,7 +20,9 @@ from app.config import (
 )
 import itertools
 from app.core.bm25 import BM25Index
-from app.core.embeddings import get_embeddings, cosine_similarity
+from app.core.embeddings import get_embeddings, cosine_similarity, encode_vector, decode_vector
+import os as _os
+EMBED_RAW_TURNS = _os.environ.get("AGENT0MEM_EMBED_RAW_TURNS", "1") == "1"
 from app.core.temporal import enrich_temporal_text, parse_timestamp_seconds, strip_temporal_markers, extract_ts_from_content
 from app.core.negative_filter import extract_negative_terms, compute_negative_penalty
 from app.core.extractor import is_raw_fragmented_tool_call
@@ -305,8 +307,9 @@ def save_memories_batch(
         records_to_insert.append((
             raw_id, request_id, user_id, session_id, "raw", role, enriched_content, msg_ts_int, msg_iso
         ))
-        # Only embed raw turns if propositions were empty, reducing vector storage by 95%
-        if not propositions:
+        # Raw turns are embedded so dense retrieval can reach facts the extractor dropped.
+        # Vectors are stored as float16 blobs (about 2 KB each), so this is cheap.
+        if EMBED_RAW_TURNS or not propositions:
             texts_for_embed.append(enriched_content)
             mem_ids_for_embed.append(raw_id)
 
@@ -330,7 +333,7 @@ def save_memories_batch(
                     conn.execute("""
                         INSERT OR REPLACE INTO embeddings (memory_id, vector)
                         VALUES (?, ?)
-                    """, (mem_id, json.dumps(emb)))
+                    """, (mem_id, encode_vector(emb)))
 
 
     return len(records_to_insert)
@@ -1758,7 +1761,7 @@ def search_hybrid(
                 for r in c_cur.fetchall():
                     if r["vector"]:
                         try:
-                            vec_map[r["memory_id"]] = json.loads(r["vector"])
+                            vec_map[r["memory_id"]] = decode_vector(r["vector"])
                         except Exception:
                             pass
 

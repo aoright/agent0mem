@@ -266,6 +266,26 @@ def retrieve(variant: str, q: dict, top_k: int) -> list[dict]:
     if variant == "clean_wide":
         from app.core.clean_search import clean_search
         return clean_search(q["user_id"], q["question"], top_k=top_k, max_items=100, byte_budget=48_000)
+    if variant in ("wide_human", "wide_chrono", "wide_human_chrono"):
+        from app.core.clean_search import clean_search
+        return clean_search(q["user_id"], q["question"], top_k=top_k, max_items=100, byte_budget=48_000,
+                            order="time" if "chrono" in variant else "score",
+                            date_style="human" if "human" in variant else "iso")
+    if variant == "full_context":
+        # Upper-bound reference, not a retrieval method: every raw turn, chronological.
+        from app.database import get_db
+        from app.core.clean_search import _clean, _day
+        with get_db() as conn:
+            rows = conn.execute("SELECT memory_id, content, timestamp, created_at FROM memories "
+                                "WHERE user_id = ? AND item_type = 'raw' ORDER BY timestamp ASC, id ASC",
+                                (q["user_id"],)).fetchall()
+        return [{"id": r["memory_id"], "content": f"[{_day(r['timestamp'], r['created_at'])}] {_clean(r['content'])}",
+                 "created_at": r["created_at"]} for r in rows]
+    if variant == "wide_notes":
+        from app.core.clean_search import clean_search
+        from app.core.query_notes import with_notes
+        return with_notes(q["question"], clean_search(q["user_id"], q["question"], top_k=top_k,
+                                                      max_items=100, byte_budget=48_000))
     raise SystemExit(f"unknown variant {variant}")
 
 
@@ -275,7 +295,7 @@ def stage_run(work: Path, variant: str, per_cat: int, seed: int, workers: int,
     # worker threads can observe a partially initialised module.
     if variant == "legacy":
         import app.database  # noqa: F401
-    elif variant.startswith("clean"):
+    else:
         import app.core.clean_search  # noqa: F401
     qs = sample_questions(per_cat, seed)
     out_path = work / f"results_{variant}.jsonl"
