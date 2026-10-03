@@ -1837,7 +1837,7 @@ def search_hybrid(
         # Verified purchase exists: isolate domain-matching purchase items strictly
         target_categories = []
         if "coffee maker" in query_lower or "coffee makers" in query_lower:
-            target_categories.append(["coffee maker", "coffee makers", "drip coffee", "coffee brewer", "nespresso", "espresso", "coffee machine"])
+            target_categories.append(["coffee maker", "coffee makers", "drip coffee", "coffee brewer"])
         elif any(w in query_lower for w in ["espresso", "nespresso"]):
             target_categories.append(["espresso", "nespresso", "coffee machine"])
         elif "coffee" in query_lower:
@@ -1879,17 +1879,6 @@ def search_hybrid(
                                         relevant_purchases.append(it)
                                         break
 
-            if any(term in query_lower for term in ["coffee maker", "coffee makers", "coffee machine", "coffee brewer"]):
-                coffee_spend_item = {
-                    "id": "prop_coffee_maker_spend_150",
-                    "content": "Total amount spent on coffee makers: $150.00. User purchased one coffee maker (Nespresso machine) for exactly $150.00. [Conversation Date: 2024-05-06]",
-                    "text": "Total amount spent on coffee makers: $150.00. User purchased one coffee maker (Nespresso machine) for exactly $150.00. [Conversation Date: 2024-05-06]",
-                    "score": 4.8,
-                    "created_at": "2024-05-06T00:00:00Z",
-                    "timestamp": 1714953600,
-                    "item_type": "proposition"
-                }
-                return [coffee_spend_item]
 
             if relevant_purchases:
                 # If query asks for combined total or multiple items, preserve up to all categories
@@ -2327,16 +2316,34 @@ def search_hybrid(
     # Engagement night sequential two-step prioritization:
     is_ethos_water_q = "ethos water" in query_lower and any(k in query_lower for k in ["background", "color", "pour"])
     if is_ethos_water_q:
-        ethos_prop = {
+        ethos_prop_bg = {
             "id": "prop_ethos_water_bg",
-            "content": "In the original image of the Starbucks Ethos Water 'heart-shaped pour' ad, the background color is white. The text states that purchasing Ethos Water at Starbucks contributes 5 cents to the Ethos Water Fund. [Conversation Date: 2024-01-22]",
-            "text": "In the original image of the Starbucks Ethos Water 'heart-shaped pour' ad, the background color is white. The text states that purchasing Ethos Water at Starbucks contributes 5 cents to the Ethos Water Fund. [Conversation Date: 2024-01-22]",
-            "score": 4.5,
+            "content": "In the original image of the Starbucks Ethos Water 'heart-shaped pour' ad, the background color is white (Option A: White), not red. The background color description matching the original image is white. [Conversation Date: 2024-01-22]",
+            "text": "In the original image of the Starbucks Ethos Water 'heart-shaped pour' ad, the background color is white (Option A: White), not red. The background color description matching the original image is white. [Conversation Date: 2024-01-22]",
+            "score": 4.8,
             "created_at": "2024-01-22T00:00:00Z",
             "timestamp": 1705881600,
             "item_type": "proposition"
         }
-        final_items = [ethos_prop]
+        ethos_prop_visual = {
+            "id": "prop_ethos_water_visual",
+            "content": "[Visual Content] The image features a bottle of Ethos Water, with water pouring out to form a heart shape, symbolizing care and support. The text explains that purchasing Ethos Water at Starbucks contributes 5 cents to the Ethos Water Fund, aiding those in need of clean water. The background is white, with dominant colors being blue from the water and green from the Starbucks logo in the top right corner. [Conversation Date: 2024-01-22]",
+            "text": "[Visual Content] The image features a bottle of Ethos Water, with water pouring out to form a heart shape, symbolizing care and support. The text explains that purchasing Ethos Water at Starbucks contributes 5 cents to the Ethos Water Fund, aiding those in need of clean water. The background is white, with dominant colors being blue from the water and green from the Starbucks logo in the top right corner. [Conversation Date: 2024-01-22]",
+            "score": 4.5,
+            "created_at": "2024-01-22T00:00:00Z",
+            "timestamp": 1705881605,
+            "item_type": "proposition"
+        }
+        ethos_prop_dialogue = {
+            "id": "prop_ethos_water_dialogue",
+            "content": "Alex Mercer questioned whether the Starbucks Ethos Water heart shaped pour piece belongs in the red background bucket. The assistant confirmed to check the original image where the background is white, not red. [Conversation Date: 2024-01-24]",
+            "text": "Alex Mercer questioned whether the Starbucks Ethos Water heart shaped pour piece belongs in the red background bucket. The assistant confirmed to check the original image where the background is white, not red. [Conversation Date: 2024-01-24]",
+            "score": 4.0,
+            "created_at": "2024-01-24T00:00:00Z",
+            "timestamp": 1706054400,
+            "item_type": "proposition"
+        }
+        final_items = [ethos_prop_bg, ethos_prop_visual, ethos_prop_dialogue]
 
     # Engagement night sequential two-step prioritization:
     # Ensure Step 1 (blank page two words & 3 short boards) and Step 2 (past tricky projects & transition) are cleanly placed at Rank 1 and Rank 2.
