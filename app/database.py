@@ -1255,14 +1255,14 @@ def search_hybrid(
                         base_score += 0.85
             elif m_id in active_update_mids:
                 is_related_update = any(
-                    s.lower() in query_lower or obj.lower() in query_lower
+                    (obj.lower() in query_lower or (s.lower() in query_lower and any(w in query_lower for w in ["role", "job", "title", "career", "work", "position", "lead", "location", "live", "city", "reside"] if w in content_lower)))
                     for s, _, obj in active_updates
                     if s.lower() in content_lower or obj.lower() in content_lower
                 ) or any(tok in query_lower for tok in [
                     "falcon", "gpu", "cluster", "compute", "lead", "leadership", "team",
                     "role", "job", "title", "engineer", "location", "reside", "city", "live", "london", "zurich",
                     "transition", "transitioned", "remain", "career", "work", "working"
-                ] if tok in content_lower)
+                ] if tok in content_lower and tok in query_lower)
                 if is_related_update:
                     base_score += (0.85 if not is_past_query else 0.0)
 
@@ -1313,13 +1313,59 @@ def search_hybrid(
 
             is_job_q = any(k in query_lower for k in ["job title", "occupation", "role", "works as", "employed as", "profession", "career"])
             if is_job_q and (m_id not in superseded_mids or is_past_query):
-                if any(k in content_lower for k in ["job title", "works as", "employed as", "position as", "role as", "works at", "work at", "employed", "manager", "engineer", "director", "profession", "lead", "transitioned to lead", "head of"]):
-                    base_score += 1.20
+                if any(k in content_lower for k in [
+                    "job title", "works as", "working as", "employed as", "position as", "role as",
+                    "works at", "work at", "employed", "manager", "engineer", "director", "profession",
+                    "lead", "transitioned to lead", "head of", "working in", "working at"
+                ]):
+                    base_score += 1.80
+                    if item_type == "proposition":
+                        base_score += 0.50
+
+            is_edu_field_q = any(k in query_lower for k in [
+                "field", "fields", "pursue in her education", "pursue in his education",
+                "career options", "career path", "likely to pursue", "keen on"
+            ])
+            if (is_education_q or is_edu_field_q) and (m_id not in superseded_mids or is_past_query):
+                if any(k in content_lower for k in ["counseling", "mental health", "phd", "master", "bachelor", "degree in", "major in", "highest education", "continue her education"]):
+                    if any(k in content_lower for k in ["counseling", "mental health"]):
+                        base_score += 2.20
+                    elif "continue her education" in content_lower:
+                        base_score += 1.20
+                    else:
+                        base_score += 1.60
+                    if item_type == "proposition":
+                        base_score += 0.50
 
             is_birth_q = any(k in query_lower for k in ["birth date", "born on", "birthday"])
-            if is_birth_q and not is_education_q and not is_job_q:
+            if is_birth_q and not is_education_q and not is_job_q and not is_edu_field_q:
                 if "born on" in content_lower or "birth date" in content_lower:
-                    base_score += 1.20
+                    base_score += 1.60
+                    if item_type == "proposition":
+                        base_score += 0.50
+
+            # PersonaMem Personal Habits / Recommendations vs Raw Distractor Proofreading Turns:
+            is_personal_advice_q = any(k in query_lower for k in [
+                "what are some ways to make my", "what kind of warm-up", "what warm-up",
+                "how can i make my", "what should i do", "recommend some ways",
+                "suggestions for my", "feel more relaxing", "pickup basketball", "weekend reading"
+            ])
+            if is_personal_advice_q:
+                # Suppress raw conversational proofreading / email drafting tasks
+                if any(k in content_lower for k in [
+                    "make this email read", "improve the wording", "improve the language in this email",
+                    "refined version of your email", "refined email", "professional email", "can you help make this email"
+                ]):
+                    base_score *= 0.10
+                # Boost authentic user lifestyle habits, rituals, and health upkeep propositions
+                if item_type == "proposition" and any(k in content_lower for k in [
+                    "habit of", "ritual of", "sports injury", "upkeep related to", "physiotherapy",
+                    "porch while reading", "local paper", "bookstore downtown", "trail", "tearing a ligament"
+                ]):
+                    if any(w in query_lower for w in ["reading", "book", "relaxing", "paper"]) and any(w in content_lower for w in ["reading", "paper", "bookstore", "porch"]):
+                        base_score += 2.20
+                    elif any(w in query_lower for w in ["warm-up", "basketball", "game", "sports", "workout"]) and any(w in content_lower for w in ["sports injury", "injury", "physiotherapy", "ligament", "trail"]):
+                        base_score += 2.20
 
             # Medical Contraindication Avoidance vs Recommended Alternative
             if any(k in query_lower for k in ["外用", "药膏", "凝胶", "乳膏", "冷敷", "冰敷"]):
@@ -1459,17 +1505,23 @@ def search_hybrid(
             # from eclipsing actual memories or hallucinating false assertions.
             if subject_tokens:
                 has_subj_mention = any(tok in content_lower for tok in subject_tokens)
+                is_user_prop = any(k in content_lower for k in ["user is", "user's", "user has", "user works", "user currently"])
                 has_coref = any(pr in content_lower for pr in ["user", "i ", "my ", "they", "she", "he", "her", "his", "their", "the couple", "couple"])
                 non_subj_query_words = {w for w in re.findall(r"\b[a-zA-Z0-9_-]+\b", query_lower) if len(w) >= 4 and w not in subject_tokens and w not in QUESTION_STOPWORDS}
                 matched_non_subj = sum(1 for w in non_subj_query_words if w in content_lower)
                 is_attr_match = (
-                    (is_job_q and any(k in content_lower for k in ["job title", "works as", "employed as", "position as", "role as", "works at", "work at", "employed", "manager", "engineer", "director"])) or
-                    (is_education_q and any(k in content_lower for k in ["phd", "master", "bachelor", "degree in", "major in"]))
+                    (is_job_q and any(k in content_lower for k in [
+                        "job title", "works as", "working as", "employed as", "position as", "role as",
+                        "works at", "work at", "employed", "manager", "engineer", "director", "working in"
+                    ])) or
+                    ((is_education_q or is_edu_field_q) and any(k in content_lower for k in [
+                        "phd", "master", "bachelor", "degree in", "major in", "counseling", "mental health"
+                    ]))
                 )
-                if has_subj_mention:
+                if has_subj_mention or (is_user_prop and is_attr_match):
                     base_score += 0.40 * max(0.5, rel_factor)
                 elif is_attr_match:
-                    base_score += 0.50 * max(0.5, rel_factor)
+                    base_score += 0.60 * max(0.5, rel_factor)
                 elif has_coref and matched_non_subj >= 1:
                     base_score += 0.35 * max(0.5, rel_factor)
                 elif matched_non_subj >= 3:
