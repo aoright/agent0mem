@@ -51,7 +51,8 @@ Rules:
 1. Each proposition must be a clear, standalone factual statement. Include the speaker name or subject (e.g., "Alice prefers green tea over coffee").
 2. Resolve pronouns (he, she, it, they, I, my) to specific named entities based on the conversation context.
 3. Temporal and Date Grounding:
-   - When turns have timestamps, convert relative dates (e.g., "yesterday", "last week", "next month", "two days ago") into explicit dates (e.g., "On 2023-07-25, Jordan started a new job").
+   - When turns have timestamps, convert day-level relative dates (e.g., "yesterday", "two days ago") to explicit dates if clear from the turn timestamp.
+   - For week-based expressions ("last week", "first week of July", "a couple weeks ago"), PRESERVE the relative expression along with the month and year (e.g., "in the first week of April 2022" or "last week in April 2022"), do not collapse it into an arbitrary single day.
    - Retain exact dates, times, locations, numbers, codes, and proper nouns verbatim.
 4. Conflict and State Updates:
    - When an entity's status, habit, location, or preference changes across time (e.g., stopped, switched, moved, relocated, changed, no longer, used to):

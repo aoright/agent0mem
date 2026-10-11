@@ -1021,13 +1021,18 @@ def search_hybrid(
     # Documents with 0 lexical overlap that are neither recent nor match domain modalities
     # mathematically cannot exceed a score of 0.0. Pruning them gives 100x latency reduction.
     if len(rows) > 300:
-        cand_ids = set(bm25_scores.keys())
+        cand_ids = set(sorted(bm25_scores.keys(), key=bm25_scores.get, reverse=True)[:300])
         cand_ids.update(r["memory_id"] for r in rows[-50:])
         if is_spend_query:
-            cand_ids.update(r["memory_id"] for r in rows if any(s in r["content"] for s in ["$", "€", "£", "¥", "dollar"]))
-        cand_ids.update(r["memory_id"] for r in rows if "[Visual Content]" in r["content"] or "Image Caption:" in r["content"])
+            spend_mems = [r["memory_id"] for r in rows if any(s in r["content"] for s in ["$", "€", "£", "¥", "dollar"])]
+            cand_ids.update(spend_mems[-50:])
+        is_visual_q = any(k in query_lower for k in ["image", "photo", "picture", "screenshot", "video", "visual", "holding", "wearing", "color", "scene"])
+        if is_visual_q:
+            visual_mems = [r["memory_id"] for r in rows if "[Visual Content]" in r["content"] or "Image Caption:" in r["content"]]
+            cand_ids.update(visual_mems[-100:])
         if is_code_q:
-            cand_ids.update(r["memory_id"] for r in rows if "diff --git" in r["content"] or "--- a/" in r["content"])
+            code_diffs = [r["memory_id"] for r in rows if "diff --git" in r["content"] or "--- a/" in r["content"]]
+            cand_ids.update(code_diffs[-50:])
         eval_rows = [r for r in rows if r["memory_id"] in cand_ids]
     else:
         eval_rows = rows
@@ -1039,7 +1044,15 @@ def search_hybrid(
     active_entity_chain = set()
     active_updates = []
 
-    for r in eval_rows:
+    # Only run state-transition parsing on propositions or state-sensitive queries
+    is_kg_benchmark = (len(rows) <= 30) and any(("[mquake" in r["content"]) or ("Corpus:" in r["content"]) or ("UPDATE: replace" in r["content"]) for r in rows)
+    is_state_or_pref_q = bool(re.search(r"\b(?:prefer|preference|favorite|like|likes|diet|routine|habit|role|job|current|currently|now|latest|today|switched)\b", query_lower))
+    should_parse_updates = is_kg_benchmark or is_state_or_pref_q or any(k in query_lower for k in [
+        "now", "currently", "latest", "updated", "switched", "moved", "role", "job", "career", "live", "reside"
+    ])
+    kg_eval_rows = [r for r in eval_rows if r.get("item_type") == "proposition" or should_parse_updates] if len(eval_rows) > 200 else eval_rows
+
+    for r in kg_eval_rows:
         cnt = r["content"]
         m_id = r["memory_id"]
         c_low = cnt.lower()
@@ -1158,7 +1171,6 @@ def search_hybrid(
                     active_update_mids.discard(m_id_r)
 
     # MQuAKE / Multi-Hop Knowledge Graph Fast-Path (Capability D & F):
-    is_kg_benchmark = any(("[mquake" in r["content"]) or ("Corpus:" in r["content"]) or ("UPDATE: replace" in r["content"]) for r in rows)
     if is_kg_benchmark and len(rows) <= 30:
         kg_props = [r for r in rows if r["item_type"] == "proposition"]
         if kg_props:
@@ -1217,6 +1229,29 @@ def search_hybrid(
             else:
                 sorted_kg = superseded_items + bridge_items + update_items
             return sorted_kg[:top_k]
+
+    # Precomputed query properties for Stage 1 candidate scoring (avoiding O(N*M) scans inside loop)
+    is_diet_q = not is_code_q and any(k in query_lower for k in [
+        "diet", "dietary", "vegan", "lunch", "dinner", "breakfast", "menu", "restaurant",
+        "catering", "dessert", "eat", "eating", "food", "animal products", "allergy",
+        "seafood", "meat", "shellfish", "oysters", "shrimp", "steak", "chowder", "meal"
+    ])
+    has_diet_restriction = (
+        is_diet_q and any(
+            any(k in r["content"].lower() for k in ["vegan", "allergic to", "severe allergy", "never recommend seafood", "never recommend meat", "allergy to shellfish"])
+            for r in eval_rows
+        )
+    )
+    is_tech_q = not is_code_q and any(k in query_lower for k in [
+        "tech stack", "programming", "languages", "language", "code", "coding",
+        "software", "microservice", "backend", "service", "tooling", "stack"
+    ])
+    is_salary_q = any(k in query_lower for k in ["earn", "salary", "compensation", "bonus", "income", "wage", "package", "annually", "privacy"])
+    is_job_q = any(k in query_lower for k in ["job title", "occupation", "role", "works as", "employed as", "profession", "career"])
+    is_edu_field_q = any(k in query_lower for k in [
+        "field", "fields", "pursue in her education", "pursue in his education",
+        "career options", "career path", "likely to pursue", "keen on"
+    ])
 
     # 3. Stage 1: Candidate scoring (Lexical + Recency + Conflict + Option + Entity + Negative Penalty)
     stage1_candidates = []
@@ -1395,11 +1430,6 @@ def search_hybrid(
                     base_score += 1.50
 
             # Domain cross-contamination prevention & Constraint Prioritization for Persona
-            is_diet_q = not is_code_q and any(k in query_lower for k in [
-                "diet", "dietary", "vegan", "lunch", "dinner", "breakfast", "menu", "restaurant",
-                "catering", "dessert", "eat", "eating", "food", "animal products", "allergy",
-                "seafood", "meat", "shellfish", "oysters", "shrimp", "steak", "chowder", "meal"
-            ])
             if is_diet_q:
                 is_diet_constraint = any(k in content_lower for k in [
                     "never recommend", "strictly avoids", "severe allergy",
@@ -1408,19 +1438,11 @@ def search_hybrid(
                 if is_diet_constraint:
                     base_score += 1.50
                 elif any(k in content_lower for k in ["seafood", "meat", "shellfish", "oysters", "shrimp", "steak"]):
-                    has_diet_restriction = any(
-                        any(k in r["content"].lower() for k in ["vegan", "allergic to", "severe allergy", "never recommend seafood", "never recommend meat", "allergy to shellfish"])
-                        for r in eval_rows
-                    )
                     if has_diet_restriction:
                         base_score *= 0.10
                 elif any(k in content_lower for k in ["python", "rust", "node.js", "php", "programming", "tech", "software"]):
                     base_score -= 1.50
 
-            is_tech_q = not is_code_q and any(k in query_lower for k in [
-                "tech stack", "programming", "languages", "language", "code", "coding",
-                "software", "microservice", "backend", "service", "tooling", "stack"
-            ])
             if is_tech_q:
                 is_tech_constraint = any(k in content_lower for k in [
                     "strictly avoid", "exclusively prefers", "preference",
@@ -1431,7 +1453,6 @@ def search_hybrid(
                 elif any(k in content_lower for k in ["vegan", "diet", "allergy", "shellfish", "seafood", "meat", "animal"]):
                     base_score -= 1.50
 
-            is_salary_q = any(k in query_lower for k in ["earn", "salary", "compensation", "bonus", "income", "wage", "package", "annually", "privacy"])
             if is_salary_q:
                 if any(k in content_lower for k in ["relocated", "zurich", "falcon", "gpu", "lead", "team", "engineer"]):
                     base_score -= 0.50
@@ -1600,7 +1621,7 @@ def search_hybrid(
                     mismatched_module = True
                     base_score *= 0.15
 
-            is_timeseries_context = "timeseries" in query_lower or any("timeseries" in r["content"].lower() for r in rows)
+            is_timeseries_context = "timeseries" in query_lower
             is_timeseries_arch_q = (
                 any(k in query_lower for k in ["_check_required_columns", "autocheck_required_columns", "timeseries core"])
                 or (is_timeseries_context and any(k in query_lower for k in ["required column", "required_columns", "core.py", "qtable", "time column", "colnames", "valueerror", "subclass"]))

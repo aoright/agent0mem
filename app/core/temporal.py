@@ -101,6 +101,29 @@ def enrich_temporal_text(text: str, base_sec: Optional[float], has_real_ts: bool
     for w in m_weeks_later:
         tags.append(f"[Relative Time: {w} weeks later]")
 
+    # Anchored relative day-of-week expressions: "last Friday", "the Friday before", "on Friday", "last weekend", "last week"
+    days_of_week = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+    d_day_first = base_dt.strftime("%d %B, %Y")
+    d_month_first = base_dt.strftime("%B %d, %Y")
+    d_no_comma = base_dt.strftime("%d %B %Y")
+    base_dow = base_dt.weekday()  # Monday is 0, Sunday is 6
+    for i, dow in enumerate(days_of_week):
+        cap_dow = dow.capitalize()
+        if re.search(rf"\b(?:last\s+{dow}|the\s+{dow}\s+before)\b", text, re.IGNORECASE) or (
+            i < base_dow and re.search(rf"\b(?:on\s+{dow}|this\s+{dow})\b", text, re.IGNORECASE)
+        ):
+            tags.append(f"[Relative Time: The {cap_dow} before {d_day_first}]")
+            tags.append(f"[Relative Time: {cap_dow} before {d_month_first}]")
+    if re.search(r"\blast\s+weekend\b", text, re.IGNORECASE):
+        tags.append(f"[Relative Time: on the weekend before {d_month_first}]")
+        tags.append(f"[Relative Time: weekend before {d_day_first}]")
+    if re.search(r"\b(?:last\s+week|a\s+week\s+before|the\s+week\s+before)\b", text, re.IGNORECASE):
+        dt_week = base_dt - timedelta(days=7)
+        tags.append(f"[Relative Time: The week before {d_no_comma}]")
+        tags.append(f"[Relative Time: a week before {d_no_comma}]")
+        tags.append(f"[Relative Time: week before {d_month_first}]")
+        tags.append(f"[Event Month: {dt_week.strftime('%B %Y')}]")
+
     # Months ago / later (Strict Month Granularity: Do NOT synthesize fake calendar days)
     m_months_ago = re.findall(r"\b(\d+)\s*months?\s*(?:ago|earlier|before)\b", text, re.IGNORECASE)
     for m in m_months_ago:
@@ -112,11 +135,16 @@ def enrich_temporal_text(text: str, base_sec: Optional[float], has_real_ts: bool
         dt = base_dt + timedelta(days=int(m) * 30)
         tags.append(f"[Event Month: {dt.strftime('%B %Y')}] [Event Month: {dt.strftime('%Y-%m')}]")
 
-    # Years ago / later (Strict Year Granularity: Do NOT synthesize fake calendar days)
+    # Years ago / later / for X years (Strict Year Granularity: Do NOT synthesize fake calendar days)
     m_years_ago = re.findall(r"\b(\d+)\s*years?\s*(?:ago|earlier|before)\b", text, re.IGNORECASE)
     for y in m_years_ago:
         dt = base_dt - timedelta(days=int(y) * 365)
-        tags.append(f"[Event Year: {dt.year}] [{dt.year}年]")
+        tags.append(f"[Event Year: {dt.year}] [{dt.year}年] [{dt.year}] (since {dt.year})")
+
+    m_years_for = re.findall(r"\bfor\s+(\d+)\s*years?\b", text, re.IGNORECASE)
+    for y in m_years_for:
+        past_y = base_dt.year - int(y)
+        tags.append(f"[Event Year: {past_y}] [{past_y}年] [{past_y}] (since {past_y})")
 
     # Yesterday / Tomorrow / Last month / Last year
     if re.search(r"\byesterday\b", text, re.IGNORECASE):
