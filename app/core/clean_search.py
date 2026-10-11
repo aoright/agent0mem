@@ -210,12 +210,21 @@ def _build_index(user_id: str) -> tuple:
     rows = _load_rows(user_id)
     by_id = {r["memory_id"]: r for r in rows}
     session_raws: Dict[str, List[str]] = {}
+    session_all: Dict[str, List[str]] = {}
+    session_times: Dict[str, str] = {}
     for r in rows:
+        sid = r.get("session_id") or "default"
+        if sid not in session_all:
+            session_all[sid] = []
+        session_all[sid].append(r["memory_id"])
         if r.get("item_type") == "raw":
-            sid = r.get("session_id") or "default"
             if sid not in session_raws:
                 session_raws[sid] = []
             session_raws[sid].append(r["memory_id"])
+        t = r.get("timestamp") or r.get("created_at") or ""
+        if sid not in session_times or (t and t < session_times[sid]):
+            session_times[sid] = t
+    session_order = sorted(session_times.keys(), key=lambda s: session_times[s])
     bm25 = BM25Index()
     bm25.fit([(r["memory_id"], _clean(r["content"])) for r in rows])
     vecs = _load_vectors(list(by_id)) if rows else {}
@@ -226,7 +235,7 @@ def _build_index(user_id: str) -> tuple:
         norms = _np.linalg.norm(m, axis=1, keepdims=True)
         norms[norms == 0] = 1.0
         mat = m / norms
-    return rows, by_id, bm25, ids, mat, vecs, session_raws
+    return rows, by_id, bm25, ids, mat, vecs, session_raws, session_order, session_all
 
 
 def _get_index(user_id: str) -> tuple:
@@ -252,7 +261,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                  order: str = "score", date_style: str = "iso") -> List[dict]:
     """order: 'score' (fused relevance) or 'time' (selected items re-sorted chronologically).
     date_style: 'iso' -> '[2023-05-20]', 'human' -> '[Said on 20 May 2023 (Saturday)]'."""
-    rows, by_id, bm25, vec_ids, vec_mat, vecs, session_raws = _get_index(user_id)
+    rows, by_id, bm25, vec_ids, vec_mat, vecs, session_raws, session_order, session_all = _get_index(user_id)
     if not rows:
         return []
 
@@ -331,8 +340,10 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             "cook bake baked recipe recipes dish dishes meal ingredients made whipped up kitchen dinner",
         ("items", "item", "collect", "collection"):
             "collect collects collected collection items sneaker sneakers jersey jerseys dvd dvds books cards comic doll camera bought",
-        ("games", "game"):
-            "game games played video board Detroit Walking Dead Battlefield It Takes Two Overcooked Catan chess",
+        ("board games", "board game", "catan", "chess"):
+            "board game games played Catan chess tabletop pieces tournament",
+        ("games", "game", "video games", "video game", "gaming", "gamer"):
+            "game games gaming played video tournament match console RPG Valorant Counter-Strike CS:GO Cyberpunk Street Fighter Xenoblade Overwatch League Fortnite Minecraft play playing",
         ("healthy", "healthy food", "healthy food suggestions", "suggestions"):
             "flavored seltzer water dark chocolate air-popped popcorn fruit veggies healthy sandwich snacks energy balls grilled chicken salad avocado healthy snack",
         ("foods", "food", "snacks", "snack", "dishes", "dish"):
@@ -657,6 +668,21 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             c_words = set(re.findall(r"\w+", c_text))
             if len(c_words & retracted_keywords) >= 2 and "forget" not in c_text and "do not remember" not in c_text:
                 continue
+
+        # Video game vs Board game disambiguation: prevent category bleed
+        is_video_game_q = bool(re.search(r"\bvideo\s+games?\b", query, re.IGNORECASE))
+        if is_video_game_q:
+            has_board = bool(re.search(r"\b(?:board\s+games?|catan|settlers\s+of\s+catan|chess|tabletop)\b", clean_c))
+            has_video = bool(re.search(r"\b(?:video\s+games?|console|rpg|valorant|counter-strike|cs:go|cyberpunk|street\s+fighter|xenoblade|overwatch|league|fortnite|minecraft|steam|playstation|xbox|nintendo)\b", clean_c))
+            if has_board and not has_video:
+                continue
+
+        is_board_game_q = bool(re.search(r"\bboard\s+games?\b", query, re.IGNORECASE))
+        if is_board_game_q:
+            has_video = bool(re.search(r"\b(?:video\s+games?|console|rpg|valorant|counter-strike|cs:go|cyberpunk|street\s+fighter|xenoblade|overwatch|league|fortnite|minecraft|steam|playstation|xbox|nintendo)\b", clean_c))
+            has_board = bool(re.search(r"\b(?:board\s+games?|catan|settlers\s+of\s+catan|chess|tabletop)\b", clean_c))
+            if has_video and not has_board:
+                continue
         # Aspect diversity within day/session with update protection
         cand_words = set(re.findall(r"[a-z]{4,}", clean_c)) - _STOPWORDS - {"conversation", "date", "year", "month", "assistant", "user", "detail", "project"}
         is_update_item = bool(re.search(r"\b(?:increase|increased|adjust|adjusted|update|updated|change|changed|switch|switched|revise|revised|reschedule|rescheduled|new|now|latest)\b", clean_c))
@@ -759,12 +785,38 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             for rmid in raw_turns:
                 if rmid not in chained_mids and rmid in by_id:
                     c_low = by_id[rmid]["content"].lower()
+                    if is_video_game_q:
+                        has_board = bool(re.search(r"\b(?:board\s+games?|catan|settlers\s+of\s+catan|chess|tabletop)\b", c_low))
+                        has_video = bool(re.search(r"\b(?:video\s+games?|console|rpg|valorant|counter-strike|cs:go|cyberpunk|street\s+fighter|xenoblade|overwatch|league|fortnite|minecraft|steam|playstation|xbox|nintendo)\b", c_low))
+                        if has_board and not has_video:
+                            continue
                     has_photo = "[shares a photo" in c_low or "photo of" in c_low or "[visual content]" in c_low
                     has_statement = any(w in c_low for w in ("favorite", "loved", "adopted", "finished", "started", "visit", "trip", "bought", "yoga", "went to", "decided", "intern"))
                     if has_photo or has_statement or len(raw_turns) <= 15:
                         expanded_chain.append(rmid)
                         chained_mids.add(rmid)
     chain_order = expanded_chain
+
+    # 9. Adjacent Session Location Bridging for "Where" Queries:
+    # Activities (e.g. diving, hiking, dinner) frequently occur during multi-day trips/vacations
+    # where the location (e.g. Phuket, Tokyo, Alaska) was introduced in an adjacent prior session.
+    is_where_q = bool(re.search(r"\bwhere\b", query, re.IGNORECASE))
+    if is_where_q and top_sessions and session_order:
+        location_candidates: List[str] = []
+        for sid in top_sessions[:3]:
+            if sid in session_order:
+                s_idx = session_order.index(sid)
+                prior_sids = session_order[max(0, s_idx - 2):s_idx]
+                for psid in prior_sids:
+                    for pmid in session_all.get(psid, []):
+                        if pmid not in chained_mids and pmid in by_id:
+                            p_text = by_id[pmid]["content"].lower()
+                            if re.search(r"\b(?:traveled|travel|trip|retreat|vacation|hotel|resort|city|island|flew|visited|staying|stayed)\b", p_text):
+                                location_candidates.append(pmid)
+                                chained_mids.add(pmid)
+        if location_candidates:
+            # Place top location candidates near top to avoid truncation
+            chain_order = chain_order[:4] + location_candidates[:4] + chain_order[4:]
 
     # Neighbour index for raw-turn and cross-representation context expansion:
     def neighbours(mid: str) -> List[str]:
