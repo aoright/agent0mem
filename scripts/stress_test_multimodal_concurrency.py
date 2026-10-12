@@ -67,6 +67,12 @@ def load_heldout_users(db_path: str) -> List[str]:
     cur = conn.cursor()
     cur.execute("SELECT DISTINCT user_id FROM memories WHERE user_id LIKE 'heldout_%'")
     users = [r[0] for r in cur.fetchall()]
+    if not users:
+        cur.execute("SELECT DISTINCT user_id FROM memories WHERE user_id LIKE 'eval:%' OR user_id LIKE '%locomo%' LIMIT 50")
+        users = [r[0] for r in cur.fetchall()]
+    if not users:
+        cur.execute("SELECT DISTINCT user_id FROM memories LIMIT 50")
+        users = [r[0] for r in cur.fetchall()]
     conn.close()
     return users
 
@@ -99,20 +105,36 @@ def direct_worker(job: Tuple[str, str, int]) -> Dict[str, Any]:
         }
 
 
+os.environ["no_proxy"] = "*"
+os.environ["NO_PROXY"] = "*"
+
+# Unproxied opener to ensure direct measurement
+_DIRECT_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def http_worker(job: Tuple[str, str, str, int]) -> Dict[str, Any]:
     endpoint, uid, q, top_k = job
-    url = f"{endpoint.rstrip('/')}/agent0mem/search"
+    base = endpoint.rstrip("/")
+    if base.endswith("/search"):
+        url = base
+    elif base.endswith("/agent0mem"):
+        url = f"{base}/search"
+    else:
+        url = f"{base}/agent0mem/search"
     payload = json.dumps({
         "user_id": uid,
         "query": q,
         "top_k": top_k,
     }).encode("utf-8")
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "Connection": "close",
+    }
 
     t0 = time.perf_counter()
     req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=15.0) as resp:
+        with _DIRECT_OPENER.open(req, timeout=15.0) as resp:
             dur_ms = (time.perf_counter() - t0) * 1000.0
             data = json.loads(resp.read().decode("utf-8"))
             items = data.get("data", [])
