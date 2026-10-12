@@ -129,12 +129,22 @@ def tokenize(text: str) -> List[str]:
                 if len(s_lower) > 1 and s_lower not in tokens:
                     tokens.append(s_lower)
 
-    # 3. Chinese / CJK unigrams and bigrams
-    zh_chars = re.findall(r"[\u4e00-\u9fff]", text)
-    for c in zh_chars:
-        tokens.append(c)
-    for i in range(len(zh_chars) - 1):
-        tokens.append(zh_chars[i] + zh_chars[i + 1])
+    # 3. Chinese / CJK unigrams, bigrams, and trigrams within contiguous CJK spans
+    for span in re.findall(r"[\u4e00-\u9fff]+", text):
+        for c in span:
+            if c not in seen:
+                tokens.append(c)
+                seen.add(c)
+        for i in range(len(span) - 1):
+            bg = span[i:i + 2]
+            if bg not in seen:
+                tokens.append(bg)
+                seen.add(bg)
+        for i in range(len(span) - 2):
+            tg = span[i:i + 3]
+            if tg not in seen:
+                tokens.append(tg)
+                seen.add(tg)
 
     return tokens
 

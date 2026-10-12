@@ -52,3 +52,5 @@ class HealthResponse(BaseModel):
     status: str = "ok"
     service: str = "agent0mem"
     version: str = "v1.0"
+    commit: Optional[str] = None
+    engine: Optional[str] = None

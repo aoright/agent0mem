@@ -274,7 +274,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     # Dense ranking
     dense: List[str] = []
     top_sim = 0.0
-    qv = (get_embeddings([query]) or [None])[0] if vec_ids else None
+    qv = (get_embeddings([query], timeout=2.0, max_retries=1) or [None])[0] if vec_ids else None
     if qv:
         if vec_mat is not None:
             q = _np.asarray(qv, dtype=_np.float32)

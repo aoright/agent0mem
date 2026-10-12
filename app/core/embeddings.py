@@ -10,9 +10,12 @@ from app.config import DASHSCOPE_API_KEY, DASHSCOPE_EMBED_URL
 
 logger = logging.getLogger("agent0mem.embeddings")
 
-# In-memory cache for embeddings to speed up repetitive queries and options
+import threading
+
+# In-memory thread-safe cache for embeddings to speed up repetitive queries and options
 _CACHE: Dict[str, List[float]] = {}
 _MAX_CACHE_SIZE = 10000
+_CACHE_LOCK = threading.Lock()
 
 
 def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
@@ -60,8 +63,8 @@ def decode_vector(raw) -> Optional[List[float]]:
     return v if isinstance(v, list) else None
 
 
-def get_embeddings(texts: List[str]) -> List[Optional[List[float]]]:
-    """Fetch text-embedding-v3 embeddings from DashScope with caching and retries."""
+def get_embeddings(texts: List[str], timeout: float = 3.0, max_retries: int = 2) -> List[Optional[List[float]]]:
+    """Fetch text-embedding-v3 embeddings from DashScope with thread-safe caching and fast failover."""
     if not texts:
         return []
     if not DASHSCOPE_API_KEY:
@@ -72,14 +75,15 @@ def get_embeddings(texts: List[str]) -> List[Optional[List[float]]]:
     missing_indices: List[int] = []
     missing_texts: List[str] = []
 
-    # Check cache first
-    for idx, text in enumerate(texts):
-        key = text.strip()
-        if key in _CACHE:
-            results[idx] = _CACHE[key]
-        else:
-            missing_indices.append(idx)
-            missing_texts.append(key[:2048] if key else " ")
+    # Thread-safe cache check
+    with _CACHE_LOCK:
+        for idx, text in enumerate(texts):
+            key = text.strip()
+            if key in _CACHE:
+                results[idx] = _CACHE[key]
+            else:
+                missing_indices.append(idx)
+                missing_texts.append(key[:2048] if key else " ")
 
     if not missing_texts:
         return results
@@ -106,23 +110,23 @@ def get_embeddings(texts: List[str]) -> List[Optional[List[float]]]:
             "Content-Type": "application/json"
         }
 
-        # Retry with backoff; rate limiting (HTTP 429) gets a longer wait so that a burst
-        # does not silently degrade search to lexical-only.
-        for attempt in range(5):
+        # Fast retry policy: configurable attempts and timeout to prevent thread starvation
+        for attempt in range(max_retries):
             throttled = False
             req = urllib.request.Request(DASHSCOPE_EMBED_URL, data=payload, headers=headers, method="POST")
             try:
-                with urllib.request.urlopen(req, timeout=15.0) as resp:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
                     if resp.status == 200:
                         data = json.loads(resp.read().decode("utf-8"))
                         embeds = data.get("output", {}).get("embeddings", [])
                         embeds_sorted = sorted(embeds, key=lambda x: x.get("text_index", 0))
-                        for sub_idx, item in enumerate(embeds_sorted):
-                            orig_idx = chunk_indices[sub_idx]
-                            emb_vec = item.get("embedding")
-                            results[orig_idx] = emb_vec
-                            if emb_vec and len(_CACHE) < _MAX_CACHE_SIZE:
-                                _CACHE[chunk_texts[sub_idx]] = emb_vec
+                        with _CACHE_LOCK:
+                            for sub_idx, item in enumerate(embeds_sorted):
+                                orig_idx = chunk_indices[sub_idx]
+                                emb_vec = item.get("embedding")
+                                results[orig_idx] = emb_vec
+                                if emb_vec and len(_CACHE) < _MAX_CACHE_SIZE:
+                                    _CACHE[chunk_texts[sub_idx]] = emb_vec
                         return True
                     else:
                         logger.warning(f"DashScope embeddings attempt {attempt + 1} HTTP {resp.status}")
@@ -132,12 +136,12 @@ def get_embeddings(texts: List[str]) -> List[Optional[List[float]]]:
                 logger.warning(f"DashScope embeddings attempt {attempt + 1} HTTP {e.code}: {err_msg}")
             except Exception as e:
                 logger.warning(f"DashScope embeddings attempt {attempt + 1} error: {str(e)}")
-            time.sleep((1.0 * 2 ** attempt) if throttled else 0.3 * (attempt + 1))
+            time.sleep(0.5 if throttled else 0.15 * (attempt + 1))
 
-        logger.error(f"Failed to generate embeddings after retries for batch {batch_num}")
+        logger.warning(f"Dense embeddings skipped for batch {batch_num} after retries; falling back cleanly to lexical.")
         return False
 
-    with ThreadPoolExecutor(max_workers=min(6, len(chunks))) as executor:
+    with ThreadPoolExecutor(max_workers=min(4, len(chunks))) as executor:
         futures = [executor.submit(fetch_chunk, ct, ci, bn) for ct, ci, bn in chunks]
         for f in futures:
             f.result()

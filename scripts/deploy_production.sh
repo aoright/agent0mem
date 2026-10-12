@@ -34,6 +34,10 @@ else
 fi
 echo "Active upstream is :${ACTIVE_PORT} (${DRAIN_SERVICE}). Staging deployment on :${TARGET_PORT} (${TARGET_SERVICE})."
 
+CURRENT_COMMIT=$(git rev-parse --short HEAD)
+echo "${CURRENT_COMMIT}" > /Users/liuyukai/CREATE/agent0mem/.git_commit
+echo "Current deployment commit is ${CURRENT_COMMIT}"
+
 echo "[3/6] Syncing application code to /opt/agent0mem/app/ with strict state protection filters..."
 rsync -avz \
   --filter=":- /Users/liuyukai/CREATE/agent0mem/.gitignore" \
@@ -50,6 +54,8 @@ rsync -avz \
   -e "ssh -o StrictHostKeyChecking=no -i ${SSH_KEY}" \
   /Users/liuyukai/CREATE/agent0mem/app/ \
   "${REMOTE_HOST}:/opt/agent0mem/app/"
+
+ssh -o StrictHostKeyChecking=no -i "${SSH_KEY}" "${REMOTE_HOST}" "echo '${CURRENT_COMMIT}' > /opt/agent0mem/.git_commit"
 
 echo "[4/6] Restarting staging service ${TARGET_SERVICE} on port ${TARGET_PORT}..."
 ssh -o StrictHostKeyChecking=no -i "${SSH_KEY}" "${REMOTE_HOST}" "

@@ -44,9 +44,35 @@ def on_startup():
     logger.info("Agent0Mem Hybrid Engine initialized successfully.")
 
 
+def get_git_commit_sha() -> str:
+    sha = os.environ.get("AGENT0MEM_COMMIT_SHA")
+    if sha:
+        return sha
+    try:
+        commit_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".git_commit")
+        if os.path.exists(commit_file):
+            with open(commit_file, "r") as f:
+                c = f.read().strip()
+                if c:
+                    return c
+        import subprocess
+        res = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=1.0)
+        if res.returncode == 0 and res.stdout.strip():
+            return res.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
+
+
 @app.get("/health", response_model=HealthResponse)
 def health_check():
-    return HealthResponse(status="ok", service="agent0mem", version="v1.0")
+    return HealthResponse(
+        status="ok",
+        service="agent0mem",
+        version="v1.0",
+        commit=get_git_commit_sha(),
+        engine=SEARCH_ENGINE,
+    )
 
 
 @app.post("/add", response_model=AddResponse)
