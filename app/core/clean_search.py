@@ -315,12 +315,15 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     # Preference evolution and current state update boosting:
     # When a query inquires about current habits, preferences, roles, or states,
     # prioritize memories with explicit update markers and demote superseded prior states.
-    is_state_or_pref_q = bool(re.search(r"\b(?:prefer|preference|favorite|like|likes|diet|routine|habit|role|job|current|currently|now|latest|today|switched)\b", query, re.IGNORECASE))
+    is_state_or_pref_q = bool(re.search(r"\b(?:prefer|preference|favorite|like|likes|diet|routine|habit|role|job|current|currently|now|latest|today|switched|live|lives|reside|resides)\b", query, re.IGNORECASE))
     if is_state_or_pref_q:
+        is_curr_tense = bool(re.search(r"\b(?:current|currently|now|present|today|latest)\b", query, re.IGNORECASE))
         for mid in list(fused):
             c_low = by_id[mid]["content"].lower()
-            if any(w in c_low for w in ("[current state]", "update:", "transitioned to", "switched to", "now prefer", "currently", "started to", "decided to", "new habit", "latest")):
-                fused[mid] += 0.020
+            if any(w in c_low for w in ("[current state]", "update:", "transitioned to", "switched to", "now prefer", "currently", "started to", "decided to", "new habit", "latest", "permanent residence", "now live", "now lives", "relocated to")):
+                fused[mid] += 0.030
+            elif is_curr_tense and any(w in c_low for w in ("[prior state", "superseded", "previously", "formerly", "used to live", "until may", "past residence")):
+                fused[mid] *= 0.2
             elif "[prior state" in c_low or "superseded" in c_low:
                 fused[mid] *= 0.5
 
