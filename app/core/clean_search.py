@@ -964,9 +964,20 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             body = re.sub(r"[^.\n]*?\b(?:catan|settlers\s+of\s+catan|board\s*game|tabletop)[^.\n]*[.\n]?", "", body, flags=re.IGNORECASE)
         m_q_month = re.search(r"\bin\s+(january|february|march|april|may|june|july|august|september|october|november|december)\b", query, re.IGNORECASE)
         if m_q_month and not re.search(r"\b(?:when|what\s+date|what\s+day|which\s+date|which\s+day|exact\s+date)\b", query, re.IGNORECASE):
-            body = re.sub(r"\s+on\s+\d{4}-\d{2}-\d{2}\b", f" in {m_q_month.group(1).capitalize()}", body)
-        if "Friday, January 20, 2022" in body and day == "2022-01-23":
-            body = body.replace("Friday, January 20, 2022", "last Friday (January 21, 2022)")
+            q_month = m_q_month.group(1).capitalize()
+
+            def _to_month(m: "re.Match") -> str:
+                # Only coarsen a trailing day-level date when it falls in the month the
+                # question asks about; never substitute a month the memory does not state.
+                try:
+                    d_obj = datetime.strptime(m.group(1), "%Y-%m-%d")
+                except ValueError:
+                    return m.group(0)
+                if d_obj.strftime("%B") != q_month:
+                    return m.group(0)
+                return f" in {q_month} {d_obj.year}"
+
+            body = re.sub(r"\s+on\s+(\d{4}-\d{2}-\d{2})\b", _to_month, body)
         if day and date_style == "human":
             content = f"[Said on {_fmt_day(day, 'human')}] {body}"
         elif day:

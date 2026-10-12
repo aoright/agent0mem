@@ -47,3 +47,22 @@ def test_no_injected_fixed_id_items():
             line = src.count("\n", 0, m.start()) + 1
             hits.append(f"{p.relative_to(APP.parent)}:{line}: {m.group(0)}")
     assert not hits, "hand-written memory items with fixed ids found:\n" + "\n".join(hits)
+
+
+# A literal full calendar date inside engine code (e.g. "January 20, 2022") almost always
+# means a patch keyed to one specific evaluation item rather than a general rule.
+LITERAL_DATE = re.compile(
+    r"[\"'][^\"'\n]*\b(?:January|February|March|April|May|June|July|August|September|October|"
+    r"November|December)\s+\d{1,2},\s+(?:19|20)\d{2}[^\"'\n]*[\"']"
+)
+
+
+def test_no_literal_calendar_dates_in_engine():
+    hits = []
+    for p, src in _sources():
+        for line_no, line in enumerate(src.splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            if LITERAL_DATE.search(line):
+                hits.append(f"{p.relative_to(APP.parent)}:{line_no}: {line.strip()[:120]}")
+    assert not hits, "literal calendar dates found in app/ (item-specific patch?):\n" + "\n".join(hits)
