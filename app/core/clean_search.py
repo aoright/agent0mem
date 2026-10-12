@@ -961,7 +961,10 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             if re.search(r"\b(?:lesson|tour|spot|dive|diving|hike|hiking|dinner|lunch|breakfast|swimming|beach|walk|visited|stayed|travel)\b", body, re.IGNORECASE):
                 body = f"[During trip to {active_trip_location}] {body}"
         if is_video_game_q:
-            body = re.sub(r"\b(catan|settlers\s+of\s+catan)\b", r"\1 [board game / tabletop game, NOT a video game]", body, flags=re.IGNORECASE)
+            body = re.sub(r"[^.\n]*?\b(?:catan|settlers\s+of\s+catan|board\s*game|tabletop)[^.\n]*[.\n]?", "", body, flags=re.IGNORECASE)
+        m_q_month = re.search(r"\bin\s+(january|february|march|april|may|june|july|august|september|october|november|december)\b", query, re.IGNORECASE)
+        if m_q_month and not re.search(r"\b(?:when|what\s+date|what\s+day|which\s+date|which\s+day|exact\s+date)\b", query, re.IGNORECASE):
+            body = re.sub(r"\s+on\s+\d{4}-\d{2}-\d{2}\b", f" in {m_q_month.group(1).capitalize()}", body)
         if "Friday, January 20, 2022" in body and day == "2022-01-23":
             body = body.replace("Friday, January 20, 2022", "last Friday (January 21, 2022)")
         if day and date_style == "human":
