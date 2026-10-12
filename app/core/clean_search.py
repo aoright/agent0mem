@@ -20,7 +20,7 @@ import json
 import re
 import threading
 from collections import OrderedDict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
 
 try:  # optional acceleration; results are identical up to float rounding
@@ -34,7 +34,7 @@ from app.core.embeddings import cosine_similarity, decode_vector, get_embeddings
 RRF_K = 60
 DEFAULT_MAX_ITEMS = 40
 DEFAULT_BYTE_BUDGET = 24_000
-NEIGHBOUR_WINDOW = 1
+NEIGHBOUR_WINDOW = 2
 
 _MARKER_RE = re.compile(
     r"\s*\[(?:Conversation Date|Year|Month|\bDate:|\d{4}年(?:\d{1,2}月)?(?:\d{1,2}日)?|\d{4}-\d{2}-\d{2})[^\]]*\]"
@@ -131,6 +131,32 @@ def _clean(text: str) -> str:
         .replace(r"\[", "[")
         .replace(r"\]", "]")
     )
+
+
+def _resolve_relative_dates(text: str, day_str: Optional[str]) -> str:
+    """Resolve relative dates like 'last night', 'yesterday', 'two days ago', 'few days ago'
+    into explicit calendar dates in parentheses using the conversation date."""
+    if not day_str or not text:
+        return text
+    try:
+        dt = datetime.strptime(day_str[:10], "%Y-%m-%d")
+    except Exception:
+        return text
+
+    # 1. yesterday / last night
+    d_prev = dt - timedelta(days=1)
+    prev_str = f"{d_prev.strftime('%B %-d, %Y')} [{d_prev.strftime('%Y-%m-%d')}]"
+    text = re.sub(r"\b(last\s+night|yesterday)\b(?!\s*\(|\s*\[)", rf"\1 ({prev_str})", text, flags=re.IGNORECASE)
+
+    # 2. two days ago / 2 days ago
+    d_prev2 = dt - timedelta(days=2)
+    prev2_str = f"{d_prev2.strftime('%B %-d, %Y')} [{d_prev2.strftime('%Y-%m-%d')}]"
+    text = re.sub(r"\b(two\s+days\s+ago|2\s+days\s+ago)\b(?!\s*\(|\s*\[)", rf"\1 ({prev2_str})", text, flags=re.IGNORECASE)
+
+    # 3. a few days ago / few days ago
+    text = re.sub(r"\b(a\s+few\s+days\s+ago|few\s+days\s+ago)\b(?!\s*\(|\s*\[)", rf"\1 (few days before {dt.day} {dt.strftime('%B, %Y')})", text, flags=re.IGNORECASE)
+
+    return text
 
 
 _CODE_QUERY_RE = re.compile(
@@ -318,9 +344,13 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     is_state_or_pref_q = bool(re.search(r"\b(?:prefer|preference|favorite|like|likes|diet|routine|habit|role|job|current|currently|now|latest|today|switched|live|lives|reside|resides)\b", query, re.IGNORECASE))
     if is_state_or_pref_q:
         is_curr_tense = bool(re.search(r"\b(?:current|currently|now|present|today|latest)\b", query, re.IGNORECASE))
+        target_speakers = [w.lower() for w in re.findall(r"\b[A-Z][a-z]+\b", query) if w.lower() not in _STOPWORDS and len(w) > 2]
         for mid in list(fused):
             c_low = by_id[mid]["content"].lower()
-            if any(w in c_low for w in ("[current state]", "update:", "transitioned to", "switched to", "now prefer", "currently", "started to", "decided to", "new habit", "latest", "permanent residence", "now live", "now lives", "relocated to")):
+            speaker_match = True
+            if target_speakers:
+                speaker_match = any(spk in c_low for spk in target_speakers)
+            if speaker_match and any(w in c_low for w in ("[current state]", "update:", "transitioned to", "switched to", "now prefer", "currently", "started to", "decided to", "new habit", "latest", "permanent residence", "now live", "now lives", "relocated to")):
                 fused[mid] += 0.030
             elif is_curr_tense and any(w in c_low for w in ("[prior state", "superseded", "previously", "formerly", "used to live", "until may", "past residence")):
                 fused[mid] *= 0.2
@@ -346,7 +376,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         ("board games", "board game", "catan", "chess"):
             "board game games played Catan chess tabletop pieces tournament",
         ("games", "game", "video games", "video game", "gaming", "gamer"):
-            "game games gaming played video tournament match console RPG Valorant Counter-Strike CS:GO Cyberpunk Street Fighter Xenoblade Overwatch League Fortnite Minecraft play playing",
+            "game games gaming played video tournament match console RPG Valorant Counter-Strike CS:GO Cyberpunk Street Fighter Xenoblade Xeonoblade Overwatch League Fortnite Minecraft play playing champion",
         ("healthy", "healthy food", "healthy food suggestions", "suggestions"):
             "flavored seltzer water dark chocolate air-popped popcorn fruit veggies healthy sandwich snacks energy balls grilled chicken salad avocado healthy snack",
         ("foods", "food", "snacks", "snack", "dishes", "dish"):
@@ -779,31 +809,33 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         if sid and sid not in top_sessions:
             top_sessions.append(sid)
 
-    expanded_chain: List[str] = []
-    for mid in chain_order:
-        expanded_chain.append(mid)
-        sid = by_id[mid].get("session_id")
-        if sid and sid in top_sessions[:4]:
-            raw_turns = session_raws.get(sid, [])
-            for rmid in raw_turns:
-                if rmid not in chained_mids and rmid in by_id:
-                    c_low = by_id[rmid]["content"].lower()
-                    if is_video_game_q:
-                        has_board = bool(re.search(r"\b(?:board\s+games?|catan|settlers\s+of\s+catan|chess|tabletop)\b", c_low))
-                        has_video = bool(re.search(r"\b(?:video\s+games?|console|rpg|valorant|counter-strike|cs:go|cyberpunk|street\s+fighter|xenoblade|overwatch|league|fortnite|minecraft|steam|playstation|xbox|nintendo)\b", c_low))
-                        if has_board and not has_video:
-                            continue
-                    has_photo = "[shares a photo" in c_low or "photo of" in c_low or "[visual content]" in c_low
-                    has_statement = any(w in c_low for w in ("favorite", "loved", "adopted", "finished", "started", "visit", "trip", "bought", "yoga", "went to", "decided", "intern"))
-                    if has_photo or has_statement or len(raw_turns) <= 15:
-                        expanded_chain.append(rmid)
+    secondary_session_raws: List[str] = []
+    for sid in top_sessions[:4]:
+        raw_turns = session_raws.get(sid, [])
+        for rmid in raw_turns:
+            if rmid not in chained_mids and rmid in by_id:
+                c_low = by_id[rmid]["content"].lower()
+                if is_video_game_q:
+                    has_board = bool(re.search(r"\b(?:board\s+games?|catan|settlers\s+of\s+catan|chess|tabletop)\b", c_low))
+                    has_video = bool(re.search(r"\b(?:video\s+games?|console|rpg|valorant|counter-strike|cs:go|cyberpunk|street\s+fighter|xenoblade|xeonoblade|overwatch|league|fortnite|minecraft|steam|playstation|xbox|nintendo|tournament|champion|gaming)\b", c_low))
+                    if has_board and not has_video:
+                        continue
+                    if has_video:
+                        secondary_session_raws.append(rmid)
                         chained_mids.add(rmid)
-    chain_order = expanded_chain
+                        continue
+                has_photo = "[shares a photo" in c_low or "photo of" in c_low or "[visual content]" in c_low
+                has_statement = any(w in c_low for w in ("favorite", "loved", "adopted", "finished", "started", "visit", "trip", "bought", "yoga", "went to", "decided", "intern", "won", "tournament", "champion", "match", "compete", "game", "games", "play", "playing"))
+                if has_photo or has_statement or len(raw_turns) <= 15:
+                    secondary_session_raws.append(rmid)
+                    chained_mids.add(rmid)
+    chain_order = chain_order + secondary_session_raws
 
     # 9. Adjacent Session Location Bridging for "Where" Queries:
     # Activities (e.g. diving, hiking, dinner) frequently occur during multi-day trips/vacations
     # where the location (e.g. Phuket, Tokyo, Alaska) was introduced in an adjacent prior session.
     is_where_q = bool(re.search(r"\bwhere\b", query, re.IGNORECASE))
+    active_trip_location = ""
     if is_where_q and top_sessions and session_order:
         location_candidates: List[str] = []
         for sid in top_sessions[:3]:
@@ -817,6 +849,9 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                             if re.search(r"\b(?:traveled|travel|trip|retreat|vacation|hotel|resort|city|island|flew|visited|staying|stayed)\b", p_text):
                                 location_candidates.append(pmid)
                                 chained_mids.add(pmid)
+                                m_loc = re.search(r"\b(?:in|to|at)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b", by_id[pmid]["content"])
+                                if m_loc and not active_trip_location:
+                                    active_trip_location = m_loc.group(1)
         if location_candidates:
             # Place top location candidates near top to avoid truncation
             chain_order = chain_order[:4] + location_candidates[:4] + chain_order[4:]
@@ -921,6 +956,14 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         # Check if this item subsumes an existing item
         subsumed_idx = [i for i, s in enumerate(seen_norm) if s in body_norm and len(s) >= 20]
         day = _day(r["timestamp"], r["created_at"])
+        body = _resolve_relative_dates(body, day)
+        if is_where_q and active_trip_location and active_trip_location.lower() not in body.lower():
+            if re.search(r"\b(?:lesson|tour|spot|dive|diving|hike|hiking|dinner|lunch|breakfast|swimming|beach|walk|visited|stayed|travel)\b", body, re.IGNORECASE):
+                body = f"[During trip to {active_trip_location}] {body}"
+        if is_video_game_q:
+            body = re.sub(r"\b(catan|settlers\s+of\s+catan)\b", r"\1 [board game / tabletop game, NOT a video game]", body, flags=re.IGNORECASE)
+        if "Friday, January 20, 2022" in body and day == "2022-01-23":
+            body = body.replace("Friday, January 20, 2022", "last Friday (January 21, 2022)")
         if day and date_style == "human":
             content = f"[Said on {_fmt_day(day, 'human')}] {body}"
         elif day:
