@@ -260,10 +260,10 @@ def retrieve(variant: str, q: dict, top_k: int) -> list[dict]:
             out.append({"id": c["id"], "content": content, "score": c.get("score", 1.0),
                         "created_at": c.get("created_at")})
         return out
-    if variant == "clean":
+    if variant in ("clean", "clean_sprint"):
         from app.core.clean_search import clean_search
         return clean_search(q["user_id"], q["question"], top_k=top_k)
-    if variant == "clean_wide":
+    if variant in ("clean_wide", "clean_sprint_wide"):
         from app.core.clean_search import clean_search
         return clean_search(q["user_id"], q["question"], top_k=top_k, max_items=100, byte_budget=48_000)
     if variant in ("wide_human", "wide_chrono", "wide_human_chrono"):

@@ -629,6 +629,8 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 else:
                     fused[mid] *= 0.05
 
+    is_video_game_q = bool(re.search(r"\bvideo\s+games?\b", query, re.IGNORECASE))
+    is_board_game_q = bool(re.search(r"\bboard\s+games?\b", query, re.IGNORECASE))
     is_streaming_task_q = bool(
         re.search(
             r"\b(?:streaming|task\s+index|trajectory|intra-transfer|intra\s+transfer|db\s+task|alf\s+task)\b",
@@ -891,14 +893,12 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 continue
 
         # Video game vs Board game disambiguation: prevent category bleed
-        is_video_game_q = bool(re.search(r"\bvideo\s+games?\b", query, re.IGNORECASE))
         if is_video_game_q:
             has_board = bool(re.search(r"\b(?:board\s+games?|catan|settlers\s+of\s+catan|chess|tabletop)\b", clean_c))
             has_video = bool(re.search(r"\b(?:video\s+games?|console|rpg|valorant|counter-strike|cs:go|cyberpunk|street\s+fighter|xenoblade|overwatch|league|fortnite|minecraft|steam|playstation|xbox|nintendo)\b", clean_c))
             if has_board and not has_video:
                 continue
 
-        is_board_game_q = bool(re.search(r"\bboard\s+games?\b", query, re.IGNORECASE))
         if is_board_game_q:
             has_video = bool(re.search(r"\b(?:video\s+games?|console|rpg|valorant|counter-strike|cs:go|cyberpunk|street\s+fighter|xenoblade|overwatch|league|fortnite|minecraft|steam|playstation|xbox|nintendo)\b", clean_c))
             has_board = bool(re.search(r"\b(?:board\s+games?|catan|settlers\s+of\s+catan|chess|tabletop)\b", clean_c))
