@@ -204,24 +204,92 @@ def _load_rows(user_id: str) -> List[dict]:
         return [dict(r) for r in cur.fetchall()]
 
 
-def _load_vectors(ids: List[str]) -> Dict[str, List[float]]:
+def _load_vectors_matrix(ids: List[str]):
+    """Load vectors from database directly into numpy matrix if numpy is present,
+    avoiding allocation of millions of Python float objects for large users."""
     from app.database import get_db
 
-    out: Dict[str, List[float]] = {}
+    if not ids:
+        return [], None, None
+
+    if _np is None:
+        out: Dict[str, List[float]] = {}
+        with get_db() as conn:
+            for i in range(0, len(ids), 500):
+                batch = ids[i:i + 500]
+                ph = ",".join("?" * len(batch))
+                for r in conn.execute(f"SELECT memory_id, vector FROM embeddings WHERE memory_id IN ({ph})", batch):
+                    v = decode_vector(r["vector"])
+                    if v:
+                        out[r["memory_id"]] = v
+        vec_ids = list(out.keys())
+        return vec_ids, None, out
+
+    vec_ids = []
+    arrays = []
     with get_db() as conn:
         for i in range(0, len(ids), 500):
             batch = ids[i:i + 500]
             ph = ",".join("?" * len(batch))
             for r in conn.execute(f"SELECT memory_id, vector FROM embeddings WHERE memory_id IN ({ph})", batch):
-                v = decode_vector(r["vector"])
-                if v:
-                    out[r["memory_id"]] = v
-    return out
+                raw = r["vector"]
+                if raw is None:
+                    continue
+                if isinstance(raw, (bytes, bytearray, memoryview)):
+                    b = bytes(raw)
+                    if b.startswith(b"F16:"):
+                        arr = _np.frombuffer(b[4:], dtype=_np.float16).astype(_np.float32)
+                        vec_ids.append(r["memory_id"])
+                        arrays.append(arr)
+                        continue
+                    try:
+                        raw = b.decode("utf-8")
+                    except UnicodeDecodeError:
+                        continue
+                try:
+                    v = json.loads(raw) if isinstance(raw, str) else None
+                    if v and isinstance(v, list):
+                        arr = _np.asarray(v, dtype=_np.float32)
+                        vec_ids.append(r["memory_id"])
+                        arrays.append(arr)
+                except Exception:
+                    continue
+
+    if not arrays:
+        return [], None, None
+
+    m = _np.stack(arrays, axis=0)
+    norms = _np.linalg.norm(m, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    mat = m / norms
+    return vec_ids, mat, None
 
 
 _INDEX_CACHE: "OrderedDict[str, tuple]" = OrderedDict()
-_INDEX_CACHE_MAX = 64
+_INDEX_CACHE_MAX_ENTRIES = 16
+_INDEX_CACHE_MAX_ROWS = 50000
 _INDEX_LOCK = threading.Lock()
+_USER_BUILD_LOCKS: Dict[str, threading.Lock] = {}
+_USER_BUILD_LOCKS_LOCK = threading.Lock()
+_BUILD_SEMAPHORE = threading.Semaphore(2)
+
+
+def _get_user_build_lock(user_id: str) -> threading.Lock:
+    with _USER_BUILD_LOCKS_LOCK:
+        lock = _USER_BUILD_LOCKS.get(user_id)
+        if lock is None:
+            if len(_USER_BUILD_LOCKS) > 1000:
+                _USER_BUILD_LOCKS.clear()
+            lock = threading.Lock()
+            _USER_BUILD_LOCKS[user_id] = lock
+        return lock
+
+
+def _evict_cache_if_needed():
+    total_rows = sum(len(entry[1][0]) for entry in _INDEX_CACHE.values())
+    while _INDEX_CACHE and (len(_INDEX_CACHE) > _INDEX_CACHE_MAX_ENTRIES or total_rows > _INDEX_CACHE_MAX_ROWS):
+        evicted_uid, evicted_val = _INDEX_CACHE.popitem(last=False)
+        total_rows -= len(evicted_val[1][0])
 
 
 def _user_key(user_id: str) -> tuple:
@@ -253,32 +321,36 @@ def _build_index(user_id: str) -> tuple:
     session_order = sorted(session_times.keys(), key=lambda s: session_times[s])
     bm25 = BM25Index()
     bm25.fit([(r["memory_id"], _clean(r["content"])) for r in rows])
-    vecs = _load_vectors(list(by_id)) if rows else {}
-    ids = list(vecs)
-    mat = None
-    if ids and _np is not None:
-        m = _np.asarray([vecs[i] for i in ids], dtype=_np.float32)
-        norms = _np.linalg.norm(m, axis=1, keepdims=True)
-        norms[norms == 0] = 1.0
-        mat = m / norms
+    ids, mat, vecs = _load_vectors_matrix(list(by_id)) if rows else ([], None, None)
     return rows, by_id, bm25, ids, mat, vecs, session_raws, session_order, session_all
 
 
 def _get_index(user_id: str) -> tuple:
-    """Cached per-user index. The key changes on every insert, so a search right after
-    a successful /add always sees the new memories."""
+    """Cached per-user index. Thread-safe single-flight to prevent thundering herd
+    under concurrent search load."""
     key = _user_key(user_id)
     with _INDEX_LOCK:
         hit = _INDEX_CACHE.get(user_id)
         if hit and hit[0] == key:
             _INDEX_CACHE.move_to_end(user_id)
             return hit[1]
-    idx = _build_index(user_id)
-    with _INDEX_LOCK:
-        _INDEX_CACHE[user_id] = (key, idx)
-        _INDEX_CACHE.move_to_end(user_id)
-        while len(_INDEX_CACHE) > _INDEX_CACHE_MAX:
-            _INDEX_CACHE.popitem(last=False)
+
+    user_lock = _get_user_build_lock(user_id)
+    with user_lock:
+        with _INDEX_LOCK:
+            hit = _INDEX_CACHE.get(user_id)
+            if hit and hit[0] == key:
+                _INDEX_CACHE.move_to_end(user_id)
+                return hit[1]
+
+        with _BUILD_SEMAPHORE:
+            idx = _build_index(user_id)
+
+        with _INDEX_LOCK:
+            _INDEX_CACHE[user_id] = (key, idx)
+            _INDEX_CACHE.move_to_end(user_id)
+            _evict_cache_if_needed()
+
     return idx
 
 
