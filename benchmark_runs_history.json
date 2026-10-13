@@ -8722,5 +8722,57 @@
         }
       ]
     }
+  },
+  {
+    "timestamp": "2026-10-13T17:48:03.611513",
+    "evaluation_id": "teval_040f01a736b11f57",
+    "track": "textual",
+    "score_data": {
+      "score": 0.6723090277777778,
+      "completed": 46,
+      "total": 46,
+      "capabilities": [
+        {
+          "count": 5,
+          "id": "A",
+          "score": 0.6
+        },
+        {
+          "count": 3,
+          "id": "B",
+          "score": 1.0
+        },
+        {
+          "count": 4,
+          "id": "C",
+          "score": 0.45
+        },
+        {
+          "count": 6,
+          "id": "D",
+          "score": 0.575
+        },
+        {
+          "count": 2,
+          "id": "E",
+          "score": 1.0
+        },
+        {
+          "count": 4,
+          "id": "G",
+          "score": 0.55
+        },
+        {
+          "count": 2,
+          "id": "H",
+          "score": 0.5
+        },
+        {
+          "count": 28,
+          "id": "streaming",
+          "score": 0.6145833333333334
+        }
+      ]
+    }
   }
 ]
