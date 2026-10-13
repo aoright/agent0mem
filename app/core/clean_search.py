@@ -49,6 +49,15 @@ _FORGET_PAT = re.compile(
     re.IGNORECASE,
 )
 
+_STREAMING_FEEDBACK_PAT = re.compile(
+    r"(?:streaming\s+online\s+qa\s+feedback:|\"schema_version\":\s*\"streaming-online-feedback|user:\s*streaming\s+online\s+qa\s+feedback:)",
+    re.IGNORECASE,
+)
+_STREAMING_TRAJECTORY_PAT = re.compile(
+    r"(?:streaming\s+intra-transfer\s+train\s+trajectory:|\"schema_version\":\s*\"streaming-intra-transfer-trajectory\"|streaming-intra-transfer-trajectory)",
+    re.IGNORECASE,
+)
+
 _ENTITY_PAT = re.compile(r"\b[^\W\d_a-z][\w\']*(?:\s+[^\W\d_a-z][\w\']*)*\b")
 _CHRONO_Q_PAT = re.compile(
     r"(?:\border\s+in\s+which\b"
@@ -62,7 +71,10 @@ _CHRONO_Q_PAT = re.compile(
     r"|\bhappened\s+(?:first|earlier|before|prior)\b"
     r"|\bwhich\s+(?:happened|occurred|came)\s+(?:first|earlier|before)\b"
     r"|\bwhich\s+event\s+(?:happened|occurred)\b"
-    r"|\b(?:oldest|earliest)\s+to\s+(?:newest|latest)\b"
+    r"|\b(?:oldest|earliest)\s+to\s+(?:newest|latest|most\s+recent)\b"
+    r"|\bfrom\s+first\s+to\s+last\b"
+    r"|\bprogression\s+of\b"
+    r"|\bchronology\s+of\b"
     r"|\bconsecutive\s+steps?\b"
     r"|\bfirst\s+step\b|\bsecond\s+step\b"
     r"|先后|顺序|时间线|按时间|哪一步|第一步|第二步|最初|最终)",
@@ -120,6 +132,59 @@ def _day(ts: Optional[int], created_at: Optional[str]) -> str:
     if created_at:
         return str(created_at)[:10]
     return ""
+
+
+def _get_effective_timestamp(it: dict) -> float:
+    """Extract the best chronological timestamp (in seconds since epoch) for sorting.
+    Prioritizes real event date if mentioned in content, then unix timestamp,
+    then ISO created_at, then conversation date."""
+    c = it.get("content") or it.get("text") or ""
+    # 1. Event Date in content: when the event actually occurred in the world
+    m_ev = re.search(r"\[Event Date:\s*(\d{4}-\d{2}-\d{2})", c)
+    if m_ev:
+        try:
+            dt = datetime.strptime(m_ev.group(1), "%Y-%m-%d")
+            return dt.replace(tzinfo=timezone.utc).timestamp()
+        except Exception:
+            pass
+
+    # 2. Unix timestamp
+    ts = it.get("timestamp")
+    if ts:
+        try:
+            t = float(ts)
+            if t > 1e11:
+                t /= 1000.0
+            if t > 0:
+                return t
+        except (ValueError, TypeError):
+            pass
+
+    # 3. ISO created_at string
+    ca = it.get("created_at")
+    if ca:
+        try:
+            dt = datetime.fromisoformat(str(ca).replace("Z", "+00:00"))
+            return dt.timestamp()
+        except Exception:
+            try:
+                dt = datetime.strptime(str(ca)[:10], "%Y-%m-%d")
+                return dt.replace(tzinfo=timezone.utc).timestamp()
+            except Exception:
+                pass
+
+    # 4. Conversation Date in content: [Conversation Date: 2023-03-15] or [2023-03-15]
+    m_conv = re.search(r"\[(?:Conversation Date|Date)?:\s*(\d{4}-\d{2}-\d{2})", c)
+    if not m_conv:
+        m_conv = re.search(r"\[(\d{4}-\d{2}-\d{2})", c)
+    if m_conv:
+        try:
+            dt = datetime.strptime(m_conv.group(1), "%Y-%m-%d")
+            return dt.replace(tzinfo=timezone.utc).timestamp()
+        except Exception:
+            pass
+
+    return 0.0
 
 
 def _clean(text: str) -> str:
@@ -415,7 +480,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     # prioritize memories with explicit update markers and demote superseded prior states.
     is_state_or_pref_q = bool(re.search(r"\b(?:prefer|preference|favorite|like|likes|diet|routine|habit|role|job|current|currently|now|latest|today|switched|live|lives|reside|resides)\b", query, re.IGNORECASE))
     if is_state_or_pref_q:
-        is_curr_tense = bool(re.search(r"\b(?:current|currently|now|present|today|latest)\b", query, re.IGNORECASE))
+        is_curr_tense = bool(re.search(r"\b(?:current|currently|now|present|today|latest|is|are|does|favor|favors)\b", query, re.IGNORECASE))
         target_speakers = [w.lower() for w in re.findall(r"\b[A-Z][a-z]+\b", query) if w.lower() not in _STOPWORDS and len(w) > 2]
         for mid in list(fused):
             c_low = by_id[mid]["content"].lower()
@@ -423,11 +488,11 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             if target_speakers:
                 speaker_match = any(spk in c_low for spk in target_speakers)
             if speaker_match and any(w in c_low for w in ("[current state]", "update:", "transitioned to", "switched to", "now prefer", "currently", "started to", "decided to", "new habit", "latest", "permanent residence", "now live", "now lives", "relocated to")):
-                fused[mid] += 0.030
+                fused[mid] += 0.035
             elif is_curr_tense and any(w in c_low for w in ("[prior state", "superseded", "previously", "formerly", "used to live", "until may", "past residence")):
-                fused[mid] *= 0.2
+                fused[mid] *= 0.1
             elif "[prior state" in c_low or "superseded" in c_low:
-                fused[mid] *= 0.5
+                fused[mid] *= 0.3
 
     # Target noun / aspect boosting for category aggregation queries (e.g. "Which cities...", "What martial arts...", "What recipes...", "What items...")
     _ASPECT_MAP = {
@@ -481,6 +546,18 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             "essay writing draft script mentor guided mentorship creative writing literature author editor revise feedback library meeting",
         ("career", "job", "work", "environment", "transition", "startup", "challenges", "uncertainties"):
             "transition startup due diligence financial health compensation package salary offer job work career promotion team company role environment",
+        ("job title", "occupation", "profession", "employer", "works at", "company", "position", "employed"):
+            "works as employed at hired position role occupation profession employer job title company engineer analyst manager director researcher specialist consultant",
+        ("education", "degree", "major", "studied", "graduated", "alma mater", "university", "college", "school", "bachelor", "master", "phd", "dissertation"):
+            "graduated university college degree studied major bachelor master phd dissertation thesis school academic education student department campus",
+        ("pet", "pets", "dog", "cat", "puppy", "kitten", "breed", "shelter", "rescue"):
+            "pet pets dog cat puppy kitten adopted rescue breed animal shelter vet veterinary puppy golden retriever lab feline canine",
+        ("birthday", "born", "age", "how old", "birth date", "birthdate"):
+            "birthday born age years old birth date celebrated anniversary turning",
+        ("married", "wedding", "husband", "wife", "spouse", "partner", "engaged", "engagement", "fiance", "fiancee"):
+            "married wedding husband wife spouse partner engaged engagement fiance fiancee relationship anniversary married to",
+        ("contact", "email", "phone", "address", "phone number", "social media", "handle"):
+            "email phone contact address phone number handle profile account website reach",
     }
     ql = query.lower()
     ql_aspect = re.sub(r"\b(?:my|your|his|her|their|our|\w+'s)\s+places?\b", "", ql)
@@ -551,6 +628,28 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                     fused[mid] += 2.0
                 else:
                     fused[mid] *= 0.05
+
+    is_streaming_task_q = bool(
+        re.search(
+            r"\b(?:streaming|task\s+index|trajectory|intra-transfer|intra\s+transfer|db\s+task|alf\s+task)\b",
+            query,
+            re.IGNORECASE,
+        )
+    )
+    if is_streaming_task_q:
+        m_stream = re.search(r"\b(DB|ALF)\s+task\s+(?:index\s+)?(\d+)\b", query, re.IGNORECASE)
+        task_type = m_stream.group(1).upper() if m_stream else None
+        task_idx = m_stream.group(2) if m_stream else None
+        for mid in list(fused):
+            c_raw = by_id[mid].get("content", "")
+            if _STREAMING_TRAJECTORY_PAT.search(c_raw):
+                if task_type and task_idx:
+                    if f'"{task_type}"' in c_raw and (f'"task_index": {task_idx}' in c_raw or f'"task_index": "{task_idx}"' in c_raw):
+                        fused[mid] += 3.0
+                    else:
+                        fused[mid] += 0.5
+                else:
+                    fused[mid] += 1.0
 
     ranked = sorted(fused.items(), key=lambda x: x[1], reverse=True)
     if not ranked:
@@ -692,13 +791,19 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         r"|strictly\s+(?:no|prohibit)\s+([^\.\n,]+?)"
         r"|do\s+not\s+(?:recommend|suggest|mention|personalize\s+with|include|use)\s+([^\.\n,]+?)"
         r"|cannot\s+eat\s+([^\.\n,]+?)"
-        r"|do\s+not\s+eat\s+([^\.\n,]+?))(?:\.|\n|,|$)",
+        r"|do\s+not\s+eat\s+([^\.\n,]+?)"
+        r"|(?:really\s+)?(?:dislike|dislikes|disliked)\s+([^\.\n,]+?)"
+        r"|(?:really\s+)?(?:hate|hates|hated)\s+([^\.\n,]+?)"
+        r"|(?:don['’]t|do\s+not|doesn['’]t|does\s+not)\s+like\s+([^\.\n,]+?)"
+        r"|not\s+a\s+fan\s+of\s+([^\.\n,]+?)"
+        r"|stopped\s+(?:eating|drinking|using|ordering|having)\s+([^\.\n,]+?)"
+        r"|aversion\s+to\s+([^\.\n,]+?))(?:\.|\n|,|$)",
         re.IGNORECASE
     )
     for r in rows:
         c_raw = r["content"]
         c_low = c_raw.lower()
-        if any(k in c_low for k in ("never", "avoid", "allerg", "intoleran", "do not", "cannot eat", "strict constraint")):
+        if any(k in c_low for k in ("never", "avoid", "allerg", "intoleran", "do not", "don't", "cannot eat", "strict constraint", "dislike", "hate", "not a fan", "stopped eating", "stopped drinking")):
             m_neg = _NEGATIVE_RULE_PAT.search(c_raw)
             if m_neg or "[strict constraint]" in c_low:
                 rule_clean_full = _clean(c_raw).strip()
@@ -759,6 +864,17 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         if score < min_score:
             break
         r = by_id[mid]
+        c_raw = r.get("content", "")
+        # Streaming feedback filtering: Post-evaluation logs dumped during streaming online evaluation
+        # contain prior failed/partial QA feedback and must never be treated as dialogue memories.
+        if _STREAMING_FEEDBACK_PAT.search(c_raw):
+            continue
+
+        # Streaming trajectory filtering: Multi-thousand character trajectories from ALF/DB tasks
+        # must only be returned when the query specifically inquires about streaming task trajectories.
+        if not is_streaming_task_q and _STREAMING_TRAJECTORY_PAT.search(c_raw):
+            continue
+
         day = _day(r["timestamp"], r["created_at"])
         slot_key = day or (r.get("session_id") or "none")
         if is_chrono and sess_counts.get(slot_key, 0) >= max_per_sess:
@@ -771,7 +887,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 continue
         if retracted_keywords:
             c_words = set(re.findall(r"\w+", c_text))
-            if len(c_words & retracted_keywords) >= 2 and "forget" not in c_text and "do not remember" not in c_text:
+            if any(len(w) >= 4 and w in retracted_keywords for w in c_words) and "forget" not in c_text and "do not remember" not in c_text:
                 continue
 
         # Video game vs Board game disambiguation: prevent category bleed
@@ -886,7 +1002,12 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         raw_turns = session_raws.get(sid, [])
         for rmid in raw_turns:
             if rmid not in chained_mids and rmid in by_id:
-                c_low = by_id[rmid]["content"].lower()
+                raw_c = by_id[rmid]["content"]
+                if _STREAMING_FEEDBACK_PAT.search(raw_c):
+                    continue
+                if not is_streaming_task_q and _STREAMING_TRAJECTORY_PAT.search(raw_c):
+                    continue
+                c_low = raw_c.lower()
                 if is_video_game_q:
                     has_board = bool(re.search(r"\b(?:board\s+games?|catan|settlers\s+of\s+catan|chess|tabletop)\b", c_low))
                     has_video = bool(re.search(r"\b(?:video\s+games?|console|rpg|valorant|counter-strike|cs:go|cyberpunk|street\s+fighter|xenoblade|xeonoblade|overwatch|league|fortnite|minecraft|steam|playstation|xbox|nintendo|tournament|champion|gaming)\b", c_low))
@@ -960,6 +1081,10 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             for nid in neighbours(mid)[:NEIGHBOUR_WINDOW]:
                 n = by_id.get(nid)
                 if n is not None and nid not in used:
+                    if _STREAMING_FEEDBACK_PAT.search(n.get("content", "")):
+                        continue
+                    if not is_streaming_task_q and _STREAMING_TRAJECTORY_PAT.search(n.get("content", "")):
+                        continue
                     c_text = _clean(n["content"])
                     if len(c_text) > 2000:
                         c_text = "..." + c_text[-2000:]
@@ -969,6 +1094,10 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             for nid in neighbours(mid)[NEIGHBOUR_WINDOW:]:
                 n = by_id.get(nid)
                 if n is not None and nid not in used:
+                    if _STREAMING_FEEDBACK_PAT.search(n.get("content", "")):
+                        continue
+                    if not is_streaming_task_q and _STREAMING_TRAJECTORY_PAT.search(n.get("content", "")):
+                        continue
                     c_text = _clean(n["content"])
                     if len(c_text) > 2000:
                         c_text = c_text[:2000] + "..."
@@ -1207,7 +1336,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 return [contradiction_notice]
 
     if order == "time":
-        out.sort(key=lambda it: (float(it.get("timestamp") or 0), it["id"]))
+        out.sort(key=lambda it: (_get_effective_timestamp(it), it["id"]))
     if contradiction_notice:
         out = [contradiction_notice] + [it for it in out if not it["id"].startswith("contra_")]
     if active_instructions:
