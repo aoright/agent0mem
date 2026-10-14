@@ -125,6 +125,15 @@ def extract_propositions(messages: List[Dict[str, Any]]) -> List[str]:
 
     full_dialogue = "\n".join(dialogue_lines)
 
+    # Skip LLM proposition extraction on machine-generated streaming feedback or trajectory payloads
+    if re.search(
+        r"(?:streaming\s+online\s+qa\s+feedback:|\"schema_version\":\s*\"streaming-online-feedback|"
+        r"streaming\s+intra-transfer\s+train\s+trajectory:|\"schema_version\":\s*\"streaming-intra-transfer-trajectory\")",
+        full_dialogue,
+        re.IGNORECASE,
+    ):
+        return []
+
     # Directly preserve code diffs and patches as high-priority propositions
     patch_propositions = []
     for line in dialogue_lines:
@@ -173,7 +182,6 @@ def extract_propositions(messages: List[Dict[str, Any]]) -> List[str]:
                         try:
                             propositions = json.loads(raw_text)
                         except Exception:
-                            import re
                             # Fallback to regex extraction of complete JSON string literals
                             matches = re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', raw_text)
                             propositions = [m.replace('\\"', '"').replace('\\n', ' ') for m in matches if len(m) > 10]
