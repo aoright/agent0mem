@@ -868,8 +868,31 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         q_stem = query
         effective_q = query
 
+    # Extract speaker names and single self-introduced user name early so lexical ranking
+    # does not over-anchor on Session 1 self-introduction turns when a query names the user.
+    speaker_names = {r["role"].lower() for r in rows if r.get("role")}
+    intro_names: set = set()
+    for r in rows:
+        c_row = r.get("content", "")
+        m_spk = re.match(r"^([A-Z][a-z]+):", c_row)
+        if m_spk:
+            speaker_names.add(m_spk.group(1).lower())
+        for m_intro in re.finditer(r"\bmy\s+name\s+is\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b", c_row):
+            intro_names.add(m_intro.group(1).strip().lower())
+    intro_tokens: set = set()
+    if len(intro_names) == 1:
+        for fn in intro_names:
+            speaker_names.add(fn)
+            for part in fn.split():
+                if len(part) > 1:
+                    speaker_names.add(part)
+                    intro_tokens.add(part)
+
     # Lexical ranking
-    q_tokens = [w for w in re.findall(r"\w+", effective_q.lower()) if w not in _STOPWORDS and len(w) > 1]
+    q_tokens = [
+        w for w in re.findall(r"\w+", effective_q.lower())
+        if w not in _STOPWORDS and w not in intro_tokens and len(w) > 1
+    ]
     lex_query = " ".join(q_tokens) if q_tokens else effective_q
     lex_hits = sorted(bm25.score(lex_query), key=lambda x: x[1], reverse=True)
     lex = [mid for mid, s in lex_hits if s > 0 and mid not in active_superseded_mids]
@@ -937,7 +960,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             query,
             re.IGNORECASE,
         ))
-        target_speakers = [w.lower() for w in re.findall(r"\b[A-Z][a-z]+\b", query) if w.lower() not in _STOPWORDS and len(w) > 2]
+        target_speakers = [w.lower() for w in re.findall(r"\b[A-Z][a-z]+\b", query) if w.lower() not in _STOPWORDS and w.lower() not in intro_tokens and len(w) > 2]
         max_row_day = max((_day(r.get("timestamp"), r.get("created_at")) for r in rows), default="")
         for mid in list(fused):
             r_m = by_id[mid]
@@ -1029,10 +1052,12 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     for keys, words in _ASPECT_MAP.items():
         if any(re.search(rf"\b{re.escape(k)}\b", ql_aspect) for k in keys):
             aspect_q_parts.append(words)
+    aspect_top_set: set = set()
     if aspect_q_parts:
         aspect_combined = " ".join(aspect_q_parts)
         aspect_scores = sorted(bm25.score(aspect_combined), key=lambda x: x[1], reverse=True)
         aspect_ranking = [mid for mid, s in aspect_scores if s > 0]
+        aspect_top_set = set(aspect_ranking[:30])
         for rank, mid in enumerate(aspect_ranking[:120]):
             fused[mid] = fused.get(mid, 0.0) + 1.0 / (RRF_K + rank + 1)
 
@@ -1102,7 +1127,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 or (query_date_human_alt and query_date_human_alt in c)
                 or (query_date_abbr and query_date_abbr in c)
             ):
-                fused[mid] = fused.get(mid, 0.0) + 0.04
+                fused[mid] = fused.get(mid, 0.0) + (0.12 if mid in aspect_top_set else 0.04)
 
     if is_first_event:
         m_ev = re.search(r"which\s+event\s+happened\s+first[,:]?\s*(.*?)\s+or\s+(.*?)\??$", query, re.IGNORECASE)
@@ -1148,21 +1173,6 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         return premise_notices if premise_notices else []
 
     # 4. Extract query entities and intent tokens (excluding speaker names and self-introduced user names)
-    speaker_names = {r["role"].lower() for r in rows if r.get("role")}
-    intro_names: set = set()
-    for r in rows:
-        c_row = r.get("content", "")
-        m_spk = re.match(r"^([A-Z][a-z]+):", c_row)
-        if m_spk:
-            speaker_names.add(m_spk.group(1).lower())
-        for m_intro in re.finditer(r"\bmy\s+name\s+is\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b", c_row):
-            intro_names.add(m_intro.group(1).strip().lower())
-    if len(intro_names) == 1:
-        for fn in intro_names:
-            speaker_names.add(fn)
-            for part in fn.split():
-                if len(part) > 1:
-                    speaker_names.add(part)
     q_entities = [e for e in extract_entities(effective_q) if e.lower() not in speaker_names]
     q_ent_words = set(re.findall(r"\w+", " ".join(q_entities).lower()))
     q_intent_tokens = [t for t in re.findall(r"\w+", effective_q)
