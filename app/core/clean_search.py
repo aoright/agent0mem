@@ -772,7 +772,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     active_superseded_mids = set() if asks_prior_state else superseded_mids
 
     mcq_split = re.split(r"\n+\s*A[\.\)]\s+", query, maxsplit=1)
-    if is_script_session and len(mcq_split) > 1 and re.search(r"\n+\s*B[\.\)]\s+", query):
+    if not re.search(r"[\u4e00-\u9fff]", query) and len(mcq_split) > 1 and re.search(r"\n+\s*B[\.\)]\s+", query):
         q_stem = mcq_split[0].strip()
         opt_lines = re.split(r"\n+\s*[A-F][\.\)]\s+", "\nA. " + mcq_split[1])
         opt_lines = [ol.strip() for ol in opt_lines if ol.strip()]
