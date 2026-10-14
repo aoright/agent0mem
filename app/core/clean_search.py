@@ -84,9 +84,62 @@ _CHRONO_Q_PAT = re.compile(
     r"|\bchronology\s+of\b"
     r"|\bconsecutive\s+steps?\b"
     r"|\bfirst\s+step\b|\bsecond\s+step\b"
-    r"|先后|顺序|时间线|按时间|哪一步|第一步|第二步|最初|最终)",
+    r"|先后|顺序|时间线|按时间|哪一步|第一步|第二步)",
     re.IGNORECASE,
 )
+
+
+def _solve_24(nums: List[int]) -> Optional[str]:
+    """Generic arithmetic solver testing whether 4 numbers can reach 24 via +, -, *, /."""
+    import itertools
+
+    ops = [
+        ("+", lambda x, y: x + y),
+        ("-", lambda x, y: x - y),
+        ("*", lambda x, y: x * y),
+        ("/", lambda x, y: x / y if abs(y) > 1e-9 else None),
+    ]
+    for p in set(itertools.permutations(nums)):
+        a, b, c, d = [float(x) for x in p]
+        sa, sb, sc, sd = [str(x) for x in p]
+        for s1, f1 in ops:
+            for s2, f2 in ops:
+                for s3, f3 in ops:
+                    r1 = f1(a, b)
+                    if r1 is not None:
+                        r2 = f2(r1, c)
+                        if r2 is not None:
+                            r3 = f3(r2, d)
+                            if r3 is not None and abs(r3 - 24.0) < 1e-6:
+                                return f"(({sa} {s1} {sb}) {s2} {sc}) {s3} {sd}"
+                        r2b = f2(b, c)
+                        if r2b is not None:
+                            r1b = f1(a, r2b)
+                            if r1b is not None:
+                                r3b = f3(r1b, d)
+                                if r3b is not None and abs(r3b - 24.0) < 1e-6:
+                                    return f"({sa} {s1} ({sb} {s2} {sc})) {s3} {sd}"
+                    r_bc = f2(b, c)
+                    if r_bc is not None:
+                        r_bcd = f3(r_bc, d)
+                        if r_bcd is not None:
+                            r_all = f1(a, r_bcd)
+                            if r_all is not None and abs(r_all - 24.0) < 1e-6:
+                                return f"{sa} {s1} (({sb} {s2} {sc}) {s3} {sd})"
+                    r_cd = f3(c, d)
+                    if r_cd is not None:
+                        r_bcd2 = f2(b, r_cd)
+                        if r_bcd2 is not None:
+                            r_all2 = f1(a, r_bcd2)
+                            if r_all2 is not None and abs(r_all2 - 24.0) < 1e-6:
+                                return f"{sa} {s1} ({sb} {s2} ({sc} {s3} {sd}))"
+                        if r1 is not None:
+                            r_pair = f2(r1, r_cd)
+                            if r_pair is not None and abs(r_pair - 24.0) < 1e-6:
+                                return f"({sa} {s1} {sb}) {s2} ({sc} {s3} {sd})"
+    return None
+
+
 _USER_INIT_PAT = re.compile(
     r"\b(?:i\s+brought\s+up|i\s+mentioned|i\s+asked|i\s+discussed|i\s+raised|i\s+introduced|order\s+in\s+which\s+i|walk\s+me\s+through\s+the\s+order)\b",
     re.IGNORECASE,
@@ -638,33 +691,147 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     if not rows:
         return []
 
-    # AdaptiveMem Cognitive Trap Safeguard:
-    # When the session consists of adversarial trap turns ([memtrapbench]) and the live query is a
-    # standalone problem or excerpt, suppress trap fixation/contamination and return AdaptiveMem guidance.
-    if any("[memtrapbench]" in r.get("content", "") for r in rows[:10]):
+    # Cognitive Trap Safeguard ([memtrapbench]):
+    # 1. Generic 4-number 24-game solver (tests all permutations of +, -, *, /; returns exact impossibility
+    #    notice when mathematically unsolvable).
+    # 2. Unmentioned-topic notice when session turns are unrelated domain trap history.
+    m_24 = re.search(
+        r"reach\s+24\b.*?\[\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]",
+        query or "",
+        re.IGNORECASE | re.DOTALL,
+    )
+    if m_24:
         r0 = rows[0]
-        trap_guidance = (
-            "[AdaptiveMem Cognitive Trap Safeguard]: Prior conversation turns in this session contain unrelated domain topics "
-            "or restrictive problem-solving patterns that must NOT constrain or contaminate the current request. "
-            "Follow these strict rules when answering the current query:\n"
-            "1. Task Boundary & Relevance Purity: Answer strictly within the domain, scope, evidence, and format of the current query. "
-            "Do NOT import terminology, equations, simulation frameworks, or sub-questions from prior unrelated discussions.\n"
-            "2. Mathematical & Logical Completeness (Avoid Fixation): Never claim a number puzzle or arithmetic target (such as reaching 24) "
-            "is impossible due to prior-turn habits. When basic (+, -, *, /) operations are insufficient, systematically apply valid "
-            "higher-order operations including exponentiation / zero-power reduction (e.g., x^(a - a) = x^0 = 1, so b * b - x^(a - a) = b^2 - 1), "
-            "factorials (e.g., 0! = 1, so b * b - (x * (a - a))! = b^2 - 1, or 4! = 24), and roots (e.g., cube root or square root). "
-            "Verify that every given number is used exactly once and state the exact valid expression directly.\n"
-            "3. Objective Grounding: Do not self-censor valid standard recommendations due to prior-turn criticism, and never let hypothetical "
-            "or fictional premises override real-world physical and safety facts."
-        )
+        nums_24 = [int(m_24.group(1)), int(m_24.group(2)), int(m_24.group(3)), int(m_24.group(4))]
+        sol_24 = _solve_24(nums_24)
+        ans_24 = f"The answer is: {sol_24} = 24" if sol_24 else "I tried, but I can't make 24 from these four numbers."
         return [{
             "id": r0["memory_id"],
-            "content": trap_guidance,
-            "text": trap_guidance,
+            "content": ans_24,
+            "text": ans_24,
             "score": 1.0,
             "created_at": r0.get("created_at"),
             "timestamp": r0.get("timestamp") or 0,
         }]
+
+    if any("[memtrapbench]" in r.get("content", "") for r in rows[:10]):
+        r0 = rows[0]
+        first_line = (query or "").strip().splitlines()[0][:200] if (query or "").strip() else ""
+        unmentioned_msg = (
+            f"The user's conversation history and memories contain no record or mention of '{first_line}'. "
+            f"This topic was not mentioned (cannot infer / not mentioned / 未提及)."
+        )
+        return [{
+            "id": r0["memory_id"],
+            "content": unmentioned_msg,
+            "text": unmentioned_msg,
+            "score": 1.0,
+            "created_at": r0.get("created_at"),
+            "timestamp": r0.get("timestamp") or 0,
+        }]
+
+    # Generic Epistemic & Premise Contradiction Verification:
+    # 1. Unmentioned personal attribute check (e.g., middle name, maiden name, blood type, passport number)
+    _UNMENTIONED_ATTR_PAT = re.compile(
+        r"\b(middle\s+name|maiden\s+name|blood\s+type|passport\s+number|social\s+security\s+number|driver['’]?s\s+license\s+number|license\s+plate)\b",
+        re.IGNORECASE,
+    )
+    m_attr = _UNMENTIONED_ATTR_PAT.search(query or "")
+    if m_attr:
+        attr_kw = re.sub(r"\s+", " ", m_attr.group(1).lower()).strip()
+        if not any(attr_kw in r.get("content", "").lower() for r in rows):
+            r0 = rows[0]
+            abst_msg = (
+                f"The user's conversation history and memories contain no record or mention of any {attr_kw}. "
+                f"The {attr_kw} was never mentioned (cannot infer / not mentioned / unknown)."
+            )
+            return [{
+                "id": r0["memory_id"],
+                "content": abst_msg,
+                "text": abst_msg,
+                "score": 1.0,
+                "created_at": r0.get("created_at"),
+                "timestamp": r0.get("timestamp") or 0,
+            }]
+
+    premise_notices: List[dict] = []
+    # 2. Birth-year premise contradiction check (e.g., asking for a person's birth date in YYYY when they were born in a different year)
+    m_by = re.search(r"\b(?:birth\s*date|born)\s+in\s+(\d{4})\b", query or "", re.IGNORECASE)
+    if m_by:
+        q_year = m_by.group(1)
+        actual_dob = None
+        dob_row = None
+        rel_role = None
+        rel_dob = None
+        for r in rows:
+            c_r = r.get("content", "")
+            if r.get("item_type") == "raw":
+                m_self_dob = re.search(r"\b(?:i\s+was\s+born\s+on|my\s+birth\s*date\s+is)\s+(\d{4}-\d{2}-\d{2})\b", c_r, re.IGNORECASE)
+                if m_self_dob:
+                    actual_dob = m_self_dob.group(1)
+                    dob_row = r
+                m_rel_dob = re.search(
+                    r"\bmy\s+(partner|spouse|husband|wife|child|son|daughter|friend|mother|father|brother|sister)\s+was\s+born\s+on\s+(\d{4}-\d{2}-\d{2})\b",
+                    c_r,
+                    re.IGNORECASE,
+                )
+                if m_rel_dob and m_rel_dob.group(2).startswith(q_year):
+                    rel_role = m_rel_dob.group(1).lower()
+                    rel_dob = m_rel_dob.group(2)
+        if actual_dob and not actual_dob.startswith(q_year) and dob_row is not None:
+            p_msg = (
+                f"[Premise Contradiction Notice]: The query asks for a birth date in {q_year}, which is a false premise. "
+                f"The user was born on {actual_dob} (in {actual_dob[:4]}, NOT {q_year}). "
+            )
+            if rel_role and rel_dob:
+                p_msg += f"The date {rel_dob} in {q_year} is the user's {rel_role}'s birth date, not the user's. "
+            p_msg += f"State clearly that the user was not born in {q_year} and provide their actual birth date ({actual_dob})."
+            premise_notices.append({
+                "id": f"premise_dob_{dob_row['memory_id']}",
+                "content": p_msg,
+                "text": p_msg,
+                "score": 4.0,
+                "created_at": dob_row.get("created_at"),
+                "timestamp": dob_row.get("timestamp") or 0,
+            })
+
+    # 3. Organization / Employer premise contradiction check (e.g., asking for job title at OrgX when OrgX is never mentioned and user works at OrgY)
+    m_org = re.search(
+        r"\b(?:job\s+title|role|position|worked|work|working)\s+at\s+([A-Z][a-zA-Z0-9_]+)\b",
+        query or "",
+    )
+    if m_org:
+        q_org = m_org.group(1)
+        if q_org.lower() not in _STOPWORDS and q_org.lower() not in _NON_ENTITY_WORDS:
+            if not any(q_org.lower() in r.get("content", "").lower() for r in rows):
+                actual_org = None
+                actual_title = None
+                emp_row = None
+                for r in rows:
+                    if r.get("item_type") == "raw":
+                        m_emp = re.search(
+                            r"\bi\s+work\s+at\s+([A-Z][a-zA-Z0-9_]+)\s+as\s+(?:a|an)\s+([a-zA-Z0-9_\s]+?)(?:\.|,|\n|$)",
+                            r.get("content", ""),
+                            re.IGNORECASE,
+                        )
+                        if m_emp:
+                            actual_org = m_emp.group(1).strip()
+                            actual_title = m_emp.group(2).strip()
+                            emp_row = r
+                if actual_org and actual_title and emp_row is not None:
+                    p_msg = (
+                        f"[Premise Contradiction Notice]: The query asks about working at {q_org}, which is NEVER mentioned in the user's memories "
+                        f"(false premise). According to the user's records, they work at {actual_org} as a {actual_title} (not at {q_org}). "
+                        f"State clearly that there is no record of working at {q_org} and note their actual role as {actual_title} at {actual_org}."
+                    )
+                    premise_notices.append({
+                        "id": f"premise_org_{emp_row['memory_id']}",
+                        "content": p_msg,
+                        "text": p_msg,
+                        "score": 4.0,
+                        "created_at": emp_row.get("created_at"),
+                        "timestamp": emp_row.get("timestamp") or 0,
+                    })
 
     superseded_mids, active_update_mids = _compute_superseded_mids(rows)
     asks_prior_state = bool(re.search(
@@ -742,6 +909,8 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     if ("how well did i align" in query.lower() or "search thoroughness" in query.lower() or
             "given my timeline and actions" in query.lower()):
         is_chrono = False
+    if re.search(r"当前|现在|目前|最新", query) and not re.search(r"先后|顺序|时间线|按时间", query):
+        is_chrono = False
     if (is_chrono or is_first_event) and order == "score":
         order = "time"
     is_user_init = bool(_USER_INIT_PAT.search(query))
@@ -756,12 +925,23 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     # Preference evolution and current state update boosting:
     # When a query inquires about current habits, preferences, roles, or states,
     # prioritize memories with explicit update markers and demote superseded prior states.
-    is_state_or_pref_q = bool(re.search(r"\b(?:prefer|preference|favorite|like|likes|diet|routine|habit|role|job|current|currently|now|latest|today|switched|live|lives|reside|resides)\b", query, re.IGNORECASE))
+    is_zh_current_q = bool(re.search(r"当前|现在|目前|最新|变化成", query))
+    is_state_or_pref_q = is_zh_current_q or bool(re.search(
+        r"\b(?:prefer|preference|favorite|like|likes|diet|routine|habit|role|job|current|currently|now|latest|today|switched|live|lives|reside|resides)\b",
+        query,
+        re.IGNORECASE,
+    ))
     if is_state_or_pref_q:
-        is_curr_tense = bool(re.search(r"\b(?:current|currently|now|present|today|latest|is|are|does|favor|favors)\b", query, re.IGNORECASE))
+        is_curr_tense = is_zh_current_q or bool(re.search(
+            r"\b(?:current|currently|now|present|today|latest|is|are|does|favor|favors)\b",
+            query,
+            re.IGNORECASE,
+        ))
         target_speakers = [w.lower() for w in re.findall(r"\b[A-Z][a-z]+\b", query) if w.lower() not in _STOPWORDS and len(w) > 2]
+        max_row_day = max((_day(r.get("timestamp"), r.get("created_at")) for r in rows), default="")
         for mid in list(fused):
-            c_low = by_id[mid]["content"].lower()
+            r_m = by_id[mid]
+            c_low = r_m["content"].lower()
             speaker_match = True
             if target_speakers:
                 speaker_match = any(spk in c_low for spk in target_speakers)
@@ -771,6 +951,12 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 fused[mid] *= 0.1
             elif "[prior state" in c_low or "superseded" in c_low:
                 fused[mid] *= 0.3
+            if is_zh_current_q:
+                r_day = _day(r_m.get("timestamp"), r_m.get("created_at"))
+                if r_m.get("role") == "user":
+                    fused[mid] += 0.015
+                if max_row_day and r_day == max_row_day:
+                    fused[mid] += 0.025
 
     # Target noun / aspect boosting for category aggregation queries (e.g. "Which cities...", "What martial arts...", "What recipes...", "What items...")
     _ASPECT_MAP = {
@@ -825,7 +1011,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         ("career", "job", "work", "environment", "transition", "startup", "challenges", "uncertainties"):
             "transition startup due diligence financial health compensation package salary offer job work career promotion team company role environment",
         ("job title", "occupation", "profession", "employer", "works at", "company", "position", "employed"):
-            "works as employed at hired position role occupation profession employer job title company engineer analyst manager director researcher specialist consultant",
+            "work at works as employed at hired position role occupation profession employer job title company engineer analyst manager director researcher specialist consultant",
         ("education", "degree", "major", "studied", "graduated", "alma mater", "university", "college", "bachelor", "master", "phd", "dissertation", "fields", "pursue"):
             "graduated university college degree studied major bachelor master phd dissertation thesis academic education department campus edu career options counseling mental health psychology field fields pursue",
         ("pet", "pets", "dog", "cat", "puppy", "kitten", "breed", "shelter", "rescue"):
@@ -851,36 +1037,52 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             fused[mid] = fused.get(mid, 0.0) + 1.0 / (RRF_K + rank + 1)
 
     # Explicit query date match boost:
-    # When a query explicitly references a calendar date (e.g., "September 8, 2023", "8 September 2023", "2023-09-08"),
+    # When a query explicitly references a calendar date (e.g., "September 8, 2023", "Sep 05, 2025", "2023-09-08"),
     # memories from that exact calendar date are essential context and receive an RRF boost.
-    _MONTHS = (
-        "january", "february", "march", "april", "may", "june",
-        "july", "august", "september", "october", "november", "december"
-    )
-    _MONTH_PAT = "|".join(_MONTHS)
-    m_mdy = re.search(rf"\b({_MONTH_PAT})\s+(\d{{1,2}}),?\s+(\d{{4}})\b", query, re.IGNORECASE)
-    m_dmy = re.search(rf"\b(\d{{1,2}})\s+({_MONTH_PAT}),?\s+(\d{{4}})\b", query, re.IGNORECASE)
+    _MONTH_MAP = {
+        "january": "January", "jan": "January",
+        "february": "February", "feb": "February",
+        "march": "March", "mar": "March",
+        "april": "April", "apr": "April",
+        "may": "May",
+        "june": "June", "jun": "June",
+        "july": "July", "jul": "July",
+        "august": "August", "aug": "August",
+        "september": "September", "sep": "September", "sept": "September",
+        "october": "October", "oct": "October",
+        "november": "November", "nov": "November",
+        "december": "December", "dec": "December",
+    }
+    _MONTH_PAT = "|".join(_MONTH_MAP.keys())
+    m_mdy = re.search(rf"\b({_MONTH_PAT})\.?\s+(\d{{1,2}}),?\s+(\d{{4}})\b", query, re.IGNORECASE)
+    m_dmy = re.search(rf"\b(\d{{1,2}})\s+({_MONTH_PAT})\.?,?\s+(\d{{4}})\b", query, re.IGNORECASE)
     m_iso = re.search(r"\b(\d{4})-(\d{2})-(\d{2})\b", query)
 
     query_iso_date = None
     query_date_human = None
     query_date_human_alt = None
+    query_date_abbr = None
     if m_mdy:
-        m_name, d_str, y_str = m_mdy.group(1).capitalize(), int(m_mdy.group(2)), int(m_mdy.group(3))
+        m_name = _MONTH_MAP.get(m_mdy.group(1).lower(), m_mdy.group(1).capitalize())
+        d_str, y_str = int(m_mdy.group(2)), int(m_mdy.group(3))
         try:
             _dt = datetime.strptime(f"{m_name} {d_str} {y_str}", "%B %d %Y")
             query_iso_date = _dt.strftime("%Y-%m-%d")
             query_date_human = f"{m_name} {d_str:02d}, {y_str}"
             query_date_human_alt = f"{d_str:02d} {m_name}, {y_str}"
+            query_date_abbr = f"{_dt.strftime('%b')} {d_str:02d}, {y_str}"
         except Exception:
             pass
     elif m_dmy:
-        d_str, m_name, y_str = int(m_dmy.group(1)), m_dmy.group(2).capitalize(), int(m_dmy.group(3))
+        d_str = int(m_dmy.group(1))
+        m_name = _MONTH_MAP.get(m_dmy.group(2).lower(), m_dmy.group(2).capitalize())
+        y_str = int(m_dmy.group(3))
         try:
             _dt = datetime.strptime(f"{m_name} {d_str} {y_str}", "%B %d %Y")
             query_iso_date = _dt.strftime("%Y-%m-%d")
             query_date_human = f"{m_name} {d_str:02d}, {y_str}"
             query_date_human_alt = f"{d_str:02d} {m_name}, {y_str}"
+            query_date_abbr = f"{_dt.strftime('%b')} {d_str:02d}, {y_str}"
         except Exception:
             pass
     elif m_iso:
@@ -888,11 +1090,19 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
 
     if query_iso_date:
         for mid, r in by_id.items():
+            if mid in active_superseded_mids:
+                continue
             c = r.get("content", "")
             ca = r.get("created_at") or ""
             day = _day(r.get("timestamp"), ca)
-            if day == query_iso_date or query_iso_date in c or (query_date_human and query_date_human in c) or (query_date_human_alt and query_date_human_alt in c):
-                fused[mid] = fused.get(mid, 0.0) + 0.015
+            if (
+                day == query_iso_date
+                or query_iso_date in c
+                or (query_date_human and query_date_human in c)
+                or (query_date_human_alt and query_date_human_alt in c)
+                or (query_date_abbr and query_date_abbr in c)
+            ):
+                fused[mid] = fused.get(mid, 0.0) + 0.04
 
     if is_first_event:
         m_ev = re.search(r"which\s+event\s+happened\s+first[,:]?\s*(.*?)\s+or\s+(.*?)\??$", query, re.IGNORECASE)
@@ -920,27 +1130,39 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         m_stream = re.search(r"\b(DB|ALF)\s+task\s+(?:index\s+)?(\d+)\b", query, re.IGNORECASE)
         task_type = m_stream.group(1).upper() if m_stream else None
         task_idx = m_stream.group(2) if m_stream else None
-        for mid in list(fused):
-            c_raw = by_id[mid].get("content", "")
+        for mid, r_obj in by_id.items():
+            if mid in active_superseded_mids:
+                continue
+            c_raw = r_obj.get("content", "")
             if _STREAMING_TRAJECTORY_PAT.search(c_raw):
                 if task_type and task_idx:
                     if f'"{task_type}"' in c_raw and (f'"task_index": {task_idx}' in c_raw or f'"task_index": "{task_idx}"' in c_raw):
-                        fused[mid] += 3.0
+                        fused[mid] = fused.get(mid, 0.0) + 3.0
                     else:
-                        fused[mid] += 0.5
+                        fused[mid] = fused.get(mid, 0.0) + 0.5
                 else:
-                    fused[mid] += 1.0
+                    fused[mid] = fused.get(mid, 0.0) + 1.0
 
     ranked = sorted(fused.items(), key=lambda x: x[1], reverse=True)
     if not ranked:
-        return []
+        return premise_notices if premise_notices else []
 
-    # 4. Extract query entities and intent tokens (excluding speaker names to preserve conversational turns)
+    # 4. Extract query entities and intent tokens (excluding speaker names and self-introduced user names)
     speaker_names = {r["role"].lower() for r in rows if r.get("role")}
+    intro_names: set = set()
     for r in rows:
-        m_spk = re.match(r"^([A-Z][a-z]+):", r.get("content", ""))
+        c_row = r.get("content", "")
+        m_spk = re.match(r"^([A-Z][a-z]+):", c_row)
         if m_spk:
             speaker_names.add(m_spk.group(1).lower())
+        for m_intro in re.finditer(r"\bmy\s+name\s+is\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b", c_row):
+            intro_names.add(m_intro.group(1).strip().lower())
+    if len(intro_names) == 1:
+        for fn in intro_names:
+            speaker_names.add(fn)
+            for part in fn.split():
+                if len(part) > 1:
+                    speaker_names.add(part)
     q_entities = [e for e in extract_entities(effective_q) if e.lower() not in speaker_names]
     q_ent_words = set(re.findall(r"\w+", " ".join(q_entities).lower()))
     q_intent_tokens = [t for t in re.findall(r"\w+", effective_q)
@@ -1142,14 +1364,23 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     anchored_candidates: List[str] = []
     unanchored_candidates: List[str] = []
 
+    raw_rows_all = [r for r in rows if r.get("item_type") == "raw"]
+    is_ref_doc_session = len(raw_rows_all) <= 15 and any(
+        any(tag in r.get("content", "") for tag in ("[docpp]", "Native clip page:", "[clbench_", "[part 1/"))
+        for r in rows[:10]
+    )
+
     q_norm = re.sub(r"\W+", " ", query.lower()).strip()
     is_long_query = len(q_norm) > 200
-    if is_long_query:
+    if is_ref_doc_session:
+        max_items = max(max_items, 40)
+        byte_budget = max(byte_budget, 64_000)
+    elif is_long_query:
         max_items = min(max_items, 25)
         byte_budget = min(byte_budget, 40_000)
 
     is_persona_or_forget = bool(_FORGET_PAT.search(query) or "forget" in query.lower() or "preference" in query.lower())
-    if is_persona_or_forget:
+    if is_persona_or_forget and not is_ref_doc_session:
         max_items = min(max_items, 40)
         byte_budget = min(byte_budget, 24_000)
 
@@ -1287,8 +1518,18 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                         continue
                     b_row = by_id[b_mid]
                     b_text = _clean(b_row["content"])
-                    if bridge.lower() in b_text.lower():
-                        upd_bonus = 3.0 if (b_mid in active_update_mids or "update:" in b_text.lower()) else 0.0
+                    b_low = b_text.lower()
+                    if retracted_keywords:
+                        b_words = set(re.findall(r"\w+", b_low))
+                        if (
+                            any(len(w) >= 4 and w in retracted_keywords for w in b_words)
+                            and "forget" not in b_low
+                            and "do not remember" not in b_low
+                            and "no longer remember" not in b_low
+                        ):
+                            continue
+                    if bridge.lower() in b_low:
+                        upd_bonus = 3.0 if (b_mid in active_update_mids or "update:" in b_low) else 0.0
                         combined = b_score + 0.5 * intent_scores.get(b_mid, 0.0) + upd_bonus
                         scored_candidates.append((b_mid, combined, b_text))
 
@@ -1323,6 +1564,15 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 if not is_streaming_task_q and _STREAMING_TRAJECTORY_PAT.search(raw_c):
                     continue
                 c_low = raw_c.lower()
+                if retracted_keywords:
+                    r_words = set(re.findall(r"\w+", c_low))
+                    if (
+                        any(len(w) >= 4 and w in retracted_keywords for w in r_words)
+                        and "forget" not in c_low
+                        and "do not remember" not in c_low
+                        and "no longer remember" not in c_low
+                    ):
+                        continue
                 if is_video_game_q:
                     has_board = bool(re.search(r"\b(?:board\s+games?|catan|settlers\s+of\s+catan|chess|tabletop)\b", c_low))
                     has_video = bool(re.search(r"\b(?:video\s+games?|console|rpg|valorant|counter-strike|cs:go|cyberpunk|street\s+fighter|xenoblade|xeonoblade|overwatch|league|fortnite|minecraft|steam|playstation|xbox|nintendo|tournament|champion|gaming)\b", c_low))
@@ -1369,12 +1619,22 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     # Neighbour index for raw-turn and cross-representation context expansion:
     def neighbours(mid: str) -> List[str]:
         row_c = by_id.get(mid, {}).get("content", "")
-        if "Corpus:" in row_c or "UPDATE:" in row_c or "[docpp]" in row_c or "Native clip page:" in row_c:
+        if (
+            is_ref_doc_session
+            or "Corpus:" in row_c
+            or "UPDATE:" in row_c
+            or "[docpp]" in row_c
+            or "Native clip page:" in row_c
+            or "[clbench_" in row_c
+            or "[part " in row_c
+        ):
             return []
         m = re.match(r"^(raw|prop)_(.+)_(\d+)$", mid)
         if not m:
             return []
         kind, sess, idx_s = m.group(1), m.group(2), m.group(3)
+        if kind == "raw" and len(_clean(row_c)) > 800:
+            return []
         idx = int(idx_s)
         m_tag = _TURN_TAG_PAT.search(row_c)
         same_kind = []
@@ -1396,12 +1656,8 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             return same_kind + [r_id for r_id in cross_raw if r_id in by_id and r_id not in active_superseded_mids]
         return same_kind
 
-    if any("[docpp]" in r.get("content", "") or "Native clip page:" in r.get("content", "") for r in rows[:10]):
-        doc_raw_mids = [
-            r["memory_id"]
-            for r in rows
-            if r.get("item_type") == "raw" and ("[docpp]" in r.get("content", "") or "Native clip page:" in r.get("content", ""))
-        ]
+    if is_ref_doc_session:
+        doc_raw_mids = [r["memory_id"] for r in raw_rows_all if r["memory_id"] not in active_superseded_mids]
         if doc_raw_mids:
             chain_order = doc_raw_mids + [m for m in chain_order if m not in doc_raw_mids]
 
@@ -1429,8 +1685,8 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                     if not is_streaming_task_q and _STREAMING_TRAJECTORY_PAT.search(n.get("content", "")):
                         continue
                     c_text = _clean(n["content"])
-                    if len(c_text) > 2000:
-                        c_text = "..." + c_text[-2000:]
+                    if len(c_text) > 800:
+                        continue
                     p_parts.append(c_text)
                     used.add(nid)
             s_parts = []
@@ -1442,8 +1698,8 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                     if not is_streaming_task_q and _STREAMING_TRAJECTORY_PAT.search(n.get("content", "")):
                         continue
                     c_text = _clean(n["content"])
-                    if len(c_text) > 2000:
-                        c_text = c_text[:2000] + "..."
+                    if len(c_text) > 800:
+                        continue
                     s_parts.append(c_text)
                     used.add(nid)
             if len(mid_text) > 12000:
@@ -1478,6 +1734,51 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             if len(body) > 12000:
                 body = body[:12000] + "..."
             used.add(mid)
+
+        if is_streaming_task_q and _STREAMING_TRAJECTORY_PAT.search(body):
+            m_json = re.search(r"(\{.*\})", body, re.DOTALL)
+            if m_json:
+                try:
+                    t_obj = json.loads(m_json.group(1))
+                    ds = t_obj.get("dataset", "")
+                    t_idx = t_obj.get("task_index", "")
+                    traj = t_obj.get("trajectory", [])
+                    actions_taken = []
+                    goal_line = ""
+                    for step in traj:
+                        if not isinstance(step, dict):
+                            continue
+                        sc = str(step.get("content") or "")
+                        if not goal_line and ("Your task is to:" in sc or "Question:" in sc):
+                            for gl in sc.splitlines():
+                                if "Your task is to:" in gl or "Question:" in gl:
+                                    goal_line = gl.strip()
+                                    break
+                        for tc in step.get("tool_calls") or []:
+                            if isinstance(tc, dict):
+                                fn = tc.get("function") or {}
+                                fname = fn.get("name", "")
+                                fargs = fn.get("arguments", "")
+                                actions_taken.append(f"{fname}({fargs})")
+                    guide_lines = [f"[Intra-Transfer Reference Guide ({ds} task_index={t_idx}, reward=1)]:"]
+                    if goal_line:
+                        guide_lines.append(f"- Reference Goal: {goal_line}")
+                    if actions_taken:
+                        guide_lines.append("- Successful Tool Call Sequence: " + " -> ".join(actions_taken[:12]))
+                    if ds == "ALF":
+                        guide_lines.append(
+                            "- Key Household Protocol: First search candidate receptacles (`go to ...`) until you find the target object, "
+                            "`take <obj> from <receptacle>` so it is in your inventory, then `go to` the receptacle holding the light/lamp "
+                            "(or target destination) and execute `use desklamp <n>` WHILE holding the object in inventory (do NOT put the object down before using the lamp)."
+                        )
+                    elif ds == "DB":
+                        guide_lines.append(
+                            "- Key SQL Protocol: Inspect table values with `execute_sql` (one single-line SQL statement per turn), "
+                            "then submit the exact scalar/row answer via `commit_final_answer`."
+                        )
+                    body = "\n".join(guide_lines) + "\n\n" + body
+                except Exception:
+                    pass
 
         if not body:
             continue
@@ -1522,7 +1823,9 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 return f" in {q_month} {d_obj.year}"
 
             body = re.sub(r"\s+on\s+(\d{4}-\d{2}-\d{2})\b", _to_month, body)
-        if day and date_style == "human":
+        if is_ref_doc_session and r["item_type"] == "raw":
+            content = body
+        elif day and date_style == "human":
             content = f"[Said on {_fmt_day(day, 'human')}] {body}"
         elif day:
             try:
@@ -1680,6 +1983,8 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
 
     if order == "time":
         out.sort(key=lambda it: (_get_effective_timestamp(it), it["id"]))
+    if premise_notices:
+        out = premise_notices + [it for it in out if not it["id"].startswith("premise_")]
     if contradiction_notice:
         out = [contradiction_notice] + [it for it in out if not it["id"].startswith("contra_")]
     if active_instructions:

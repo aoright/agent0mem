@@ -182,7 +182,7 @@ def search_memory(req: SearchRequest):
                                  score=c.get("score"), created_at=c.get("created_at"))
                 for c in clean_items
             ]
-            logger.info(f"Search[clean] for user {req.user_id}: query={query_str[:120]!r}, returned {len(items)} items")
+            logger.info(f"Search[clean] for user {req.user_id}: query={query_str[:600]!r}, returned {len(items)} items")
             return SearchResponse(data=items)
 
         # Legacy engine: coding namespaces only (pending a held-out coding evaluation).
@@ -217,7 +217,7 @@ def search_memory(req: SearchRequest):
                 )
             )
 
-        logger.info(f"Search for user {req.user_id}: query={query_str[:120]!r}, returned {len(items)} items")
+        logger.info(f"Search for user {req.user_id}: query={query_str[:600]!r}, returned {len(items)} items")
         return SearchResponse(data=items)
     except Exception as e:
         logger.error(f"Error processing Search request: {str(e)}", exc_info=True)
