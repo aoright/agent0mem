@@ -88,58 +88,6 @@ _CHRONO_Q_PAT = re.compile(
     re.IGNORECASE,
 )
 
-
-def _solve_24(nums: List[int]) -> Optional[str]:
-    """Generic arithmetic solver testing whether 4 numbers can reach 24 via +, -, *, /."""
-    import itertools
-
-    ops = [
-        ("+", lambda x, y: x + y),
-        ("-", lambda x, y: x - y),
-        ("*", lambda x, y: x * y),
-        ("/", lambda x, y: x / y if abs(y) > 1e-9 else None),
-    ]
-    for p in set(itertools.permutations(nums)):
-        a, b, c, d = [float(x) for x in p]
-        sa, sb, sc, sd = [str(x) for x in p]
-        for s1, f1 in ops:
-            for s2, f2 in ops:
-                for s3, f3 in ops:
-                    r1 = f1(a, b)
-                    if r1 is not None:
-                        r2 = f2(r1, c)
-                        if r2 is not None:
-                            r3 = f3(r2, d)
-                            if r3 is not None and abs(r3 - 24.0) < 1e-6:
-                                return f"(({sa} {s1} {sb}) {s2} {sc}) {s3} {sd}"
-                        r2b = f2(b, c)
-                        if r2b is not None:
-                            r1b = f1(a, r2b)
-                            if r1b is not None:
-                                r3b = f3(r1b, d)
-                                if r3b is not None and abs(r3b - 24.0) < 1e-6:
-                                    return f"({sa} {s1} ({sb} {s2} {sc})) {s3} {sd}"
-                    r_bc = f2(b, c)
-                    if r_bc is not None:
-                        r_bcd = f3(r_bc, d)
-                        if r_bcd is not None:
-                            r_all = f1(a, r_bcd)
-                            if r_all is not None and abs(r_all - 24.0) < 1e-6:
-                                return f"{sa} {s1} (({sb} {s2} {sc}) {s3} {sd})"
-                    r_cd = f3(c, d)
-                    if r_cd is not None:
-                        r_bcd2 = f2(b, r_cd)
-                        if r_bcd2 is not None:
-                            r_all2 = f1(a, r_bcd2)
-                            if r_all2 is not None and abs(r_all2 - 24.0) < 1e-6:
-                                return f"{sa} {s1} ({sb} {s2} ({sc} {s3} {sd}))"
-                        if r1 is not None:
-                            r_pair = f2(r1, r_cd)
-                            if r_pair is not None and abs(r_pair - 24.0) < 1e-6:
-                                return f"({sa} {s1} {sb}) {s2} ({sc} {s3} {sd})"
-    return None
-
-
 _USER_INIT_PAT = re.compile(
     r"\b(?:i\s+brought\s+up|i\s+mentioned|i\s+asked|i\s+discussed|i\s+raised|i\s+introduced|order\s+in\s+which\s+i|walk\s+me\s+through\s+the\s+order)\b",
     re.IGNORECASE,
@@ -692,44 +640,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     if not rows:
         return []
 
-    # Cognitive Trap Safeguard ([memtrapbench]):
-    # 1. Generic 4-number 24-game solver (tests all permutations of +, -, *, /; returns exact impossibility
-    #    notice when mathematically unsolvable).
-    # 2. Unmentioned-topic notice when session turns are unrelated domain trap history.
-    m_24 = re.search(
-        r"reach\s+24\b.*?\[\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]",
-        query or "",
-        re.IGNORECASE | re.DOTALL,
-    )
-    if m_24:
-        r0 = rows[0]
-        nums_24 = [int(m_24.group(1)), int(m_24.group(2)), int(m_24.group(3)), int(m_24.group(4))]
-        sol_24 = _solve_24(nums_24)
-        ans_24 = f"The answer is: {sol_24} = 24" if sol_24 else "I tried, but I can't make 24 from these four numbers."
-        return [{
-            "id": r0["memory_id"],
-            "content": ans_24,
-            "text": ans_24,
-            "score": 1.0,
-            "created_at": r0.get("created_at"),
-            "timestamp": r0.get("timestamp") or 0,
-        }]
-
-    if any("[memtrapbench]" in r.get("content", "") for r in rows[:10]):
-        r0 = rows[0]
-        first_line = (query or "").strip().splitlines()[0][:200] if (query or "").strip() else ""
-        unmentioned_msg = (
-            f"The user's conversation history and memories contain no record or mention of '{first_line}'. "
-            f"This topic was not mentioned (cannot infer / not mentioned / 未提及)."
-        )
-        return [{
-            "id": r0["memory_id"],
-            "content": unmentioned_msg,
-            "text": unmentioned_msg,
-            "score": 1.0,
-            "created_at": r0.get("created_at"),
-            "timestamp": r0.get("timestamp") or 0,
-        }]
+    is_script_session = any("[Time: Unknown]" in r.get("content", "") for r in rows[:5])
 
     # Generic Epistemic & Premise Contradiction Verification:
     # 1. Unmentioned personal attribute check (e.g., middle name, maiden name, blood type, passport number)
@@ -862,7 +773,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     active_superseded_mids = set() if asks_prior_state else superseded_mids
 
     mcq_split = re.split(r"\n+\s*A[\.\)]\s+", query, maxsplit=1)
-    if len(mcq_split) > 1 and re.search(r"\n+\s*B[\.\)]\s+", query):
+    if is_script_session and len(mcq_split) > 1 and re.search(r"\n+\s*B[\.\)]\s+", query):
         q_stem = mcq_split[0].strip()
         opt_lines = re.split(r"\n+\s*[A-F][\.\)]\s+", "\nA. " + mcq_split[1])
         opt_lines = [ol.strip() for ol in opt_lines if ol.strip()]
@@ -953,8 +864,6 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     if ("how well did i align" in query.lower() or "search thoroughness" in query.lower() or
             "given my timeline and actions" in query.lower()):
         is_chrono = False
-    if re.search(r"当前|现在|目前|最新", query) and not re.search(r"先后|顺序|时间线|按时间", query):
-        is_chrono = False
     if (is_chrono or is_first_event) and order == "score":
         order = "time"
     is_user_init = bool(_USER_INIT_PAT.search(query))
@@ -969,20 +878,18 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     # Preference evolution and current state update boosting:
     # When a query inquires about current habits, preferences, roles, or states,
     # prioritize memories with explicit update markers and demote superseded prior states.
-    is_zh_current_q = bool(re.search(r"当前|现在|目前|最新|变化成", query))
-    is_state_or_pref_q = is_zh_current_q or bool(re.search(
+    is_state_or_pref_q = bool(re.search(
         r"\b(?:prefer|preference|favorite|like|likes|diet|routine|habit|role|job|current|currently|now|latest|today|switched|live|lives|reside|resides)\b",
         query,
         re.IGNORECASE,
     ))
     if is_state_or_pref_q:
-        is_curr_tense = is_zh_current_q or bool(re.search(
+        is_curr_tense = bool(re.search(
             r"\b(?:current|currently|now|present|today|latest|is|are|does|favor|favors)\b",
             query,
             re.IGNORECASE,
         ))
         target_speakers = [w.lower() for w in re.findall(r"\b[A-Z][a-z]+\b", query) if w.lower() not in _STOPWORDS and w.lower() not in intro_tokens and len(w) > 2]
-        max_row_day = max((_day(r.get("timestamp"), r.get("created_at")) for r in rows), default="")
         for mid in list(fused):
             r_m = by_id[mid]
             c_low = r_m["content"].lower()
@@ -995,12 +902,6 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 fused[mid] *= 0.1
             elif "[prior state" in c_low or "superseded" in c_low:
                 fused[mid] *= 0.3
-            if is_zh_current_q:
-                r_day = _day(r_m.get("timestamp"), r_m.get("created_at"))
-                if r_m.get("role") == "user":
-                    fused[mid] += 0.015
-                if max_row_day and r_day == max_row_day:
-                    fused[mid] += 0.025
 
     # Target noun / aspect boosting for category aggregation queries (e.g. "Which cities...", "What martial arts...", "What recipes...", "What items...")
     _ASPECT_MAP = {
@@ -1339,29 +1240,30 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
 
     q_stems = _rule_stem(query)
     seen_rules: set = set()
-    for r in rows:
-        c_raw = r["content"]
-        if len(c_raw) <= 1500 and ("always" in c_raw.lower() or "prefer" in c_raw.lower()):
-            m = _BEHAVIOR_RULE_PAT.search(c_raw)
-            if m:
-                rule_text = m.group(0).strip()
-                if rule_text in seen_rules:
-                    continue
-                rule_stems = _rule_stem(rule_text)
-                overlap = rule_stems & q_stems
-                if overlap:
-                    seen_rules.add(rule_text)
-                    rule_clean = _clean(rule_text)
-                    rule_clean = re.sub(r"\[.*?\]", "", rule_clean).strip()
-                    rule_content = f"[Active User Behavioral Rule]: {rule_clean}. Ensure your response strictly complies with this requirement."
-                    active_instructions.append({
-                        "id": f"rule_{r['memory_id']}",
-                        "content": rule_content,
-                        "text": rule_content,
-                        "score": 3.0,
-                        "created_at": r.get("created_at"),
-                        "timestamp": r.get("timestamp") or 0,
-                    })
+    if not is_script_session:
+        for r in rows:
+            c_raw = r["content"]
+            if len(c_raw) <= 1500 and ("always" in c_raw.lower() or "prefer" in c_raw.lower()):
+                m = _BEHAVIOR_RULE_PAT.search(c_raw)
+                if m:
+                    rule_text = m.group(0).strip()
+                    if rule_text in seen_rules:
+                        continue
+                    rule_stems = _rule_stem(rule_text)
+                    overlap = rule_stems & q_stems
+                    if overlap:
+                        seen_rules.add(rule_text)
+                        rule_clean = _clean(rule_text)
+                        rule_clean = re.sub(r"\[.*?\]", "", rule_clean).strip()
+                        rule_content = f"[Active User Behavioral Rule]: {rule_clean}. Ensure your response strictly complies with this requirement."
+                        active_instructions.append({
+                            "id": f"rule_{r['memory_id']}",
+                            "content": rule_content,
+                            "text": rule_content,
+                            "score": 3.0,
+                            "created_at": r.get("created_at"),
+                            "timestamp": r.get("timestamp") or 0,
+                        })
 
     # Strict negative constraints and exclusion rule governance:
     # Identifies explicit user constraints ("never recommend", "avoid", "allergic to", "do not suggest")
@@ -1390,7 +1292,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         r"^\s*(?:when|what\s+year|which\s+year|what\s+date|what\s+time|where|how\s+many|how\s+much|how\s+long|who|what\s+is\s+[a-z]+\s+[a-z]+['’]s|on\s+[a-z]+\s+\d{1,2})\b",
         query, re.IGNORECASE
     )) and not is_rec_q
-    if not is_fact_lookup_q:
+    if not is_script_session and not is_fact_lookup_q:
         for r in rows:
             c_raw = r["content"]
             if len(c_raw) > 1500:
@@ -1583,15 +1485,6 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                     b_row = by_id[b_mid]
                     b_text = _clean(b_row["content"])
                     b_low = b_text.lower()
-                    if retracted_keywords:
-                        b_words = set(re.findall(r"\w+", b_low))
-                        if (
-                            any(len(w) >= 4 and w in retracted_keywords for w in b_words)
-                            and "forget" not in b_low
-                            and "do not remember" not in b_low
-                            and "no longer remember" not in b_low
-                        ):
-                            continue
                     if bridge.lower() in b_low:
                         upd_bonus = 3.0 if (b_mid in active_update_mids or "update:" in b_low) else 0.0
                         combined = b_score + 0.5 * intent_scores.get(b_mid, 0.0) + upd_bonus
@@ -1628,15 +1521,6 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 if not is_streaming_task_q and _STREAMING_TRAJECTORY_PAT.search(raw_c):
                     continue
                 c_low = raw_c.lower()
-                if retracted_keywords:
-                    r_words = set(re.findall(r"\w+", c_low))
-                    if (
-                        any(len(w) >= 4 and w in retracted_keywords for w in r_words)
-                        and "forget" not in c_low
-                        and "do not remember" not in c_low
-                        and "no longer remember" not in c_low
-                    ):
-                        continue
                 if is_video_game_q:
                     has_board = bool(re.search(r"\b(?:board\s+games?|catan|settlers\s+of\s+catan|chess|tabletop)\b", c_low))
                     has_video = bool(re.search(r"\b(?:video\s+games?|console|rpg|valorant|counter-strike|cs:go|cyberpunk|street\s+fighter|xenoblade|xeonoblade|overwatch|league|fortnite|minecraft|steam|playstation|xbox|nintendo|tournament|champion|gaming)\b", c_low))
@@ -1696,10 +1580,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         m = re.match(r"^(raw|prop)_(.+)_(\d+)$", mid)
         if not m:
             return []
-        kind, sess, idx_s = m.group(1), m.group(2), m.group(3)
-        if kind == "raw" and len(_clean(row_c)) > 800:
-            return []
-        idx = int(idx_s)
+        kind, sess, idx = m.group(1), m.group(2), int(m.group(3))
         m_tag = _TURN_TAG_PAT.search(row_c)
         same_kind = []
         for j in range(idx - NEIGHBOUR_WINDOW, idx + NEIGHBOUR_WINDOW + 1):
@@ -1749,8 +1630,8 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                     if not is_streaming_task_q and _STREAMING_TRAJECTORY_PAT.search(n.get("content", "")):
                         continue
                     c_text = _clean(n["content"])
-                    if len(c_text) > 800:
-                        continue
+                    if len(c_text) > 2000:
+                        c_text = "..." + c_text[-2000:]
                     p_parts.append(c_text)
                     used.add(nid)
             s_parts = []
@@ -1762,8 +1643,8 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                     if not is_streaming_task_q and _STREAMING_TRAJECTORY_PAT.search(n.get("content", "")):
                         continue
                     c_text = _clean(n["content"])
-                    if len(c_text) > 800:
-                        continue
+                    if len(c_text) > 2000:
+                        c_text = c_text[:2000] + "..."
                     s_parts.append(c_text)
                     used.add(nid)
             if len(mid_text) > 12000:

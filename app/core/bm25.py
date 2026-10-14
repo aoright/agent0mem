@@ -129,27 +129,22 @@ def tokenize(text: str) -> List[str]:
                 if len(s_lower) > 1 and s_lower not in tokens:
                     tokens.append(s_lower)
 
-    # 3. Chinese / CJK unigrams, bigrams, and trigrams within content CJK sub-spans
-    _cjk_particles = set("的了吗呢吧啊呀哦嘛")
-    _cjk_stop_ngrams = {"是多少", "多少", "什么", "怎么", "哪一", "哪些", "为什么", "多少分", "少分钟"}
-    for raw_span in re.findall(r"[\u4e00-\u9fff]+", text):
-        for span in re.split(r"[的了吗呢吧啊呀哦嘛]+", raw_span):
-            if not span:
-                continue
-            for c in span:
-                if c not in _cjk_particles and c not in seen:
-                    tokens.append(c)
-                    seen.add(c)
-            for i in range(len(span) - 1):
-                bg = span[i:i + 2]
-                if bg not in _cjk_stop_ngrams and bg not in seen:
-                    tokens.append(bg)
-                    seen.add(bg)
-            for i in range(len(span) - 2):
-                tg = span[i:i + 3]
-                if tg not in _cjk_stop_ngrams and tg not in seen:
-                    tokens.append(tg)
-                    seen.add(tg)
+    # 3. Chinese / CJK unigrams, bigrams, and trigrams within contiguous CJK spans
+    for span in re.findall(r"[\u4e00-\u9fff]+", text):
+        for c in span:
+            if c not in seen:
+                tokens.append(c)
+                seen.add(c)
+        for i in range(len(span) - 1):
+            bg = span[i:i + 2]
+            if bg not in seen:
+                tokens.append(bg)
+                seen.add(bg)
+        for i in range(len(span) - 2):
+            tg = span[i:i + 3]
+            if tg not in seen:
+                tokens.append(tg)
+                seen.add(tg)
 
     return tokens
 
