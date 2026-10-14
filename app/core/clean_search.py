@@ -597,7 +597,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         and not _STREAMING_TRAJECTORY_PAT.search(r.get("content", ""))
         and not _STREAMING_FEEDBACK_PAT.search(r.get("content", ""))
     ]
-    if 1 <= len(doc_raw_rows) <= 15 and max((len(r.get("content", "")) for r in doc_raw_rows), default=0) >= 3500:
+    if 2 <= len(doc_raw_rows) <= 15 and max((len(r.get("content", "")) for r in doc_raw_rows), default=0) >= 3500:
         q_norm_doc = re.sub(r"\W+", " ", query.lower()).strip()
         prior_doc_raws = []
         for idx_r, r in enumerate(doc_raw_rows):
@@ -606,31 +606,32 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             if len(c_norm_r) > 30 and c_norm_r[:80] in q_norm_doc and len(q_norm_doc) >= len(c_norm_r) * 0.8:
                 continue
             prior_doc_raws.append((r.get("timestamp") or idx_r, idx_r, r, c_clean))
-        prior_doc_raws.sort(key=lambda x: (x[0], x[1]))
-        doc_out: List[dict] = []
-        doc_total = 0
-        doc_budget = max(byte_budget, 64_000)
-        for _, _, r, c_clean in prior_doc_raws:
-            role_label = r.get("role") or "user"
-            body = f"[{role_label}]: {c_clean}" if len(prior_doc_raws) > 1 else c_clean
-            b_bytes = len(body.encode("utf-8"))
-            if doc_total + b_bytes > doc_budget:
-                avail = doc_budget - doc_total
-                if avail > 1000:
-                    body = body[:avail] + "..."
-                    b_bytes = len(body.encode("utf-8"))
-                else:
-                    continue
-            doc_total += b_bytes
-            doc_out.append({
-                "id": r["memory_id"],
-                "content": body,
-                "text": body,
-                "score": 1.0,
-                "created_at": r.get("created_at"),
-                "timestamp": r.get("timestamp"),
-            })
-        return doc_out
+        if prior_doc_raws:
+            prior_doc_raws.sort(key=lambda x: (x[0], x[1]))
+            doc_out: List[dict] = []
+            doc_total = 0
+            doc_budget = max(byte_budget, 64_000)
+            for _, _, r, c_clean in prior_doc_raws:
+                role_label = r.get("role") or "user"
+                body = f"[{role_label}]: {c_clean}" if len(prior_doc_raws) > 1 else c_clean
+                b_bytes = len(body.encode("utf-8"))
+                if doc_total + b_bytes > doc_budget:
+                    avail = doc_budget - doc_total
+                    if avail > 1000:
+                        body = body[:avail] + "..."
+                        b_bytes = len(body.encode("utf-8"))
+                    else:
+                        continue
+                doc_total += b_bytes
+                doc_out.append({
+                    "id": r["memory_id"],
+                    "content": body,
+                    "text": body,
+                    "score": 1.0,
+                    "created_at": r.get("created_at"),
+                    "timestamp": r.get("timestamp"),
+                })
+            return doc_out
 
     # Lexical ranking
     q_tokens = [w for w in re.findall(r"\w+", q_full_core.lower()) if w not in _STOPWORDS and len(w) > 1]
