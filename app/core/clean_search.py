@@ -614,6 +614,7 @@ def _build_index(user_id: str) -> tuple:
         for r in all_rows
         if r.get("item_type") == "raw" and r.get("content")
     }
+    is_script_session = any("[Time: Unknown]" in r.get("content", "") for r in all_rows[:20])
     rows: List[dict] = []
     for r in all_rows:
         if r.get("item_type") == "proposition":
@@ -625,7 +626,7 @@ def _build_index(user_id: str) -> tuple:
                     re.IGNORECASE,
                 )
             )
-            if is_fallback_prefix or (_norm_for_dedup(c_str) in raw_norms and len(_norm_for_dedup(c_str)) >= 15):
+            if is_script_session or is_fallback_prefix or (_norm_for_dedup(c_str) in raw_norms and len(_norm_for_dedup(c_str)) >= 15):
                 continue
         rows.append(r)
     if not rows and all_rows:
@@ -755,6 +756,26 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             }]
 
     premise_notices: List[dict] = []
+    if re.search(r"\b(?:have\s+any\s+pets|own\s+any\s+pets|pet['’]?s\s+name)\b", query or "", re.IGNORECASE):
+        _PET_EVIDENCE_PAT = re.compile(
+            r"\b(?:pet|pets|dog|dogs|cat|cats|puppy|puppies|kitten|kittens|rabbit|hamster|parrot|turtle|goldfish|guinea\s+pig|ferret|retriever|poodle|shepherd|terrier|bulldog|beagle|husky|dachshund|chihuahua|siamese|tabby|calico|vet|veterinary|shelter)\b",
+            re.IGNORECASE,
+        )
+        if not any(_PET_EVIDENCE_PAT.search(r.get("content", "")) for r in rows):
+            r0 = rows[0]
+            p_msg = (
+                "[Unmentioned Detail Notice]: The user's conversation history and memories contain no record or mention of any pets "
+                "(whether the user has any pets was never mentioned / cannot infer / unknown)."
+            )
+            premise_notices.append({
+                "id": f"premise_pet_{r0['memory_id']}",
+                "content": p_msg,
+                "text": p_msg,
+                "score": 4.0,
+                "created_at": r0.get("created_at"),
+                "timestamp": r0.get("timestamp") or 0,
+            })
+
     # 2. Birth-year premise contradiction check (e.g., asking for a person's birth date in YYYY when they were born in a different year)
     m_by = re.search(r"\b(?:birth\s*date|born)\s+in\s+(\d{4})\b", query or "", re.IGNORECASE)
     if m_by:
@@ -1128,6 +1149,45 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 or (query_date_abbr and query_date_abbr in c)
             ):
                 fused[mid] = fused.get(mid, 0.0) + (0.12 if mid in aspect_top_set else 0.04)
+
+        if re.search(r"\bjob\s+title\s+on\b", query or "", re.IGNORECASE):
+            has_job_on_or_before = False
+            later_org = None
+            later_title = None
+            later_day = None
+            later_row = None
+            for r in rows:
+                if r.get("item_type") != "raw":
+                    continue
+                r_day = _day(r.get("timestamp"), r.get("created_at"))
+                c_r = r.get("content", "")
+                if r_day and r_day <= query_iso_date:
+                    if re.search(r"\b(?:i\s+work\s+at|i\s+work\s+as|currently\s+employed|my\s+job\s+title)\b", c_r, re.IGNORECASE):
+                        has_job_on_or_before = True
+                elif r_day and r_day > query_iso_date:
+                    m_emp = re.search(
+                        r"\bi\s+work\s+at\s+([A-Z][a-zA-Z0-9_]+)\s+as\s+(?:a|an)\s+([a-zA-Z0-9_\s]+?)(?:\.|,|\n|$)",
+                        c_r,
+                        re.IGNORECASE,
+                    )
+                    if m_emp:
+                        later_org = m_emp.group(1).strip()
+                        later_title = m_emp.group(2).strip()
+                        later_day = r_day
+                        later_row = r
+            if not has_job_on_or_before and later_org and later_title and later_row is not None:
+                p_msg = (
+                    f"[Temporal Premise Notice]: On {query_iso_date}, no job title or employment information was mentioned or recorded in the conversation history "
+                    f"(cannot infer / not mentioned for {query_iso_date}). The user only shared their job title later on {later_day} (working at {later_org} as a {later_title})."
+                )
+                premise_notices.append({
+                    "id": f"premise_jobdate_{later_row['memory_id']}",
+                    "content": p_msg,
+                    "text": p_msg,
+                    "score": 4.0,
+                    "created_at": later_row.get("created_at"),
+                    "timestamp": later_row.get("timestamp") or 0,
+                })
 
     if is_first_event:
         m_ev = re.search(r"which\s+event\s+happened\s+first[,:]?\s*(.*?)\s+or\s+(.*?)\??$", query, re.IGNORECASE)
