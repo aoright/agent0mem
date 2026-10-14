@@ -55,7 +55,7 @@ Reply with ONLY one word: 'ANSWERABLE' or 'UNANSWERABLE'."""
         url = f"{DASHSCOPE_BASE_URL}/chat/completions"
         headers = {"Authorization": f"Bearer {DASHSCOPE_API_KEY}", "Content-Type": "application/json"}
         payload = json.dumps({
-            "model": "qwen-turbo",
+            "model": "qwen-flash",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.0,
             "max_tokens": 10

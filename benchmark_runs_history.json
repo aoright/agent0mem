@@ -8774,5 +8774,179 @@
         }
       ]
     }
+  },
+  {
+    "timestamp": "2026-10-14T17:06:39.417455",
+    "evaluation_id": "teval_c57d61fd08a5eb20",
+    "track": "textual",
+    "score_data": {
+      "score": 0.6057291666666668,
+      "completed": 46,
+      "total": 46,
+      "capabilities": [
+        {
+          "count": 5,
+          "id": "A",
+          "score": 0.4
+        },
+        {
+          "count": 3,
+          "id": "B",
+          "score": 1.0
+        },
+        {
+          "count": 4,
+          "id": "C",
+          "score": 0.4
+        },
+        {
+          "count": 6,
+          "id": "D",
+          "score": 0.5333333333333333
+        },
+        {
+          "count": 2,
+          "id": "E",
+          "score": 1.0
+        },
+        {
+          "count": 4,
+          "id": "G",
+          "score": 0.55
+        },
+        {
+          "count": 2,
+          "id": "H",
+          "score": 0.5
+        },
+        {
+          "count": 28,
+          "id": "streaming",
+          "score": 0.6458333333333333
+        }
+      ],
+      "subcapabilities": [
+        {
+          "capability_id": "A",
+          "count": 3,
+          "id": "A1",
+          "score": 0.3333333333333333
+        },
+        {
+          "capability_id": "A",
+          "count": 4,
+          "id": "A2",
+          "score": 0.5
+        },
+        {
+          "capability_id": "B",
+          "count": 1,
+          "id": "B1",
+          "score": 1.0
+        },
+        {
+          "capability_id": "B",
+          "count": 2,
+          "id": "B2",
+          "score": 1.0
+        },
+        {
+          "capability_id": "B",
+          "count": 1,
+          "id": "B4",
+          "score": 1.0
+        },
+        {
+          "capability_id": "C",
+          "count": 3,
+          "id": "C1",
+          "score": 0.19999999999999998
+        },
+        {
+          "capability_id": "C",
+          "count": 1,
+          "id": "C2",
+          "score": 0.6
+        },
+        {
+          "capability_id": "C",
+          "count": 1,
+          "id": "C3",
+          "score": 1.0
+        },
+        {
+          "capability_id": "D",
+          "count": 3,
+          "id": "D1",
+          "score": 0.6666666666666666
+        },
+        {
+          "capability_id": "D",
+          "count": 3,
+          "id": "D2",
+          "score": 0.39999999999999997
+        },
+        {
+          "capability_id": "E",
+          "count": 1,
+          "id": "E1",
+          "score": 1.0
+        },
+        {
+          "capability_id": "E",
+          "count": 1,
+          "id": "E2",
+          "score": 1.0
+        },
+        {
+          "capability_id": "E",
+          "count": 1,
+          "id": "E3",
+          "score": 1.0
+        },
+        {
+          "capability_id": "D",
+          "count": 1,
+          "id": "F1",
+          "score": 0.0
+        },
+        {
+          "capability_id": "G",
+          "count": 1,
+          "id": "G1",
+          "score": 1.0
+        },
+        {
+          "capability_id": "G",
+          "count": 1,
+          "id": "G2",
+          "score": 0.2
+        },
+        {
+          "capability_id": "G",
+          "count": 2,
+          "id": "G4",
+          "score": 0.5
+        },
+        {
+          "capability_id": "H",
+          "count": 2,
+          "id": "H2",
+          "score": 0.5
+        },
+        {
+          "capability_id": "streaming",
+          "count": 26,
+          "id": "streaming.online",
+          "score": 0.6666666666666666
+        },
+        {
+          "capability_id": "streaming",
+          "count": 2,
+          "id": "streaming.intra_transfer",
+          "score": 0.5
+        }
+      ]
+    }
   }
 ]

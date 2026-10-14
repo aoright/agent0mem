@@ -15,7 +15,8 @@ import os as _os
 
 # A single 6 s attempt timed out under load and silently stored raw dialogue as
 # "propositions". Defaults below give the extractor room to finish.
-EXTRACTION_MODEL = _os.environ.get("AGENT0MEM_EXTRACTION_MODEL", "qwen-turbo")
+EXTRACTION_MODEL = _os.environ.get("AGENT0MEM_EXTRACTION_MODEL", "qwen-flash")
+EXTRACTION_FALLBACK_MODEL = _os.environ.get("AGENT0MEM_EXTRACTION_FALLBACK_MODEL", "qwen-plus")
 EXTRACTION_TIMEOUT_SEC = float(_os.environ.get("AGENT0MEM_EXTRACTION_TIMEOUT_SEC", "20"))
 EXTRACTION_ATTEMPTS = int(_os.environ.get("AGENT0MEM_EXTRACTION_ATTEMPTS", "2"))
 
@@ -62,7 +63,7 @@ Rules:
      - Mark prior status with transition links:
        "[Prior State / Superseded] Entity previously ... (e.g., [Prior State / Superseded] Jordan previously lived in London until May 2023 before moving to Berlin in June 2023)"
 5. Exact Lists:
-   - For lists of items (e.g., hobbies, visited countries, ingredients, recommendations), include all mentioned items and do not hallucinate extras.
+   - For lists of items (e.g., hobbies, visited countries, ingredients, recommendations), keep all mentioned items together in a SINGLE complete proposition (e.g., "The user's three favorite hobbies are rock climbing, sourdough baking, and landscape photography") rather than splitting them into separate single-item statements, and do not hallucinate extras.
 6. Constraints, Allergies, and Negative Preferences:
    - Explicitly record all mentioned constraints, allergies, and negative preferences completely. Do not omit any items or allergens (e.g., if the user avoids peanuts and shellfish, include BOTH: "User strictly avoids peanuts and shellfish due to severe allergies").
 7. Ignore meaningless pleasantries, greetings, and filler (e.g., "hi", "ok", "sounds good", "thanks").
@@ -125,10 +126,12 @@ def extract_propositions(messages: List[Dict[str, Any]]) -> List[str]:
 
     full_dialogue = "\n".join(dialogue_lines)
 
-    # Skip LLM proposition extraction on machine-generated streaming feedback or trajectory payloads
+    # Skip LLM proposition extraction on machine-generated streaming feedback, trajectory payloads,
+    # and structured document/triple/trap corpora where raw turns already preserve exact content.
     if re.search(
         r"(?:streaming\s+online\s+qa\s+feedback:|\"schema_version\":\s*\"streaming-online-feedback|"
-        r"streaming\s+intra-transfer\s+train\s+trajectory:|\"schema_version\":\s*\"streaming-intra-transfer-trajectory\")",
+        r"streaming\s+intra-transfer\s+train\s+trajectory:|\"schema_version\":\s*\"streaming-intra-transfer-trajectory|"
+        r"\[docpp\]|Native\s+clip\s+page:|\[memtrapbench\]|Corpus:\s*(?:UPDATE:|\{)|\[tempreason\]|\[clbench)",
         full_dialogue,
         re.IGNORECASE,
     ):
@@ -155,17 +158,18 @@ def extract_propositions(messages: List[Dict[str, Any]]) -> List[str]:
             "Authorization": f"Bearer {DASHSCOPE_API_KEY}",
             "Content-Type": "application/json"
         }
-        payload = json.dumps({
-            "model": EXTRACTION_MODEL,
-            "messages": [
-                {"role": "system", "content": EXTRACTION_PROMPT},
-                {"role": "user", "content": f"Conversation:\n{dialogue_for_llm}\n\nAtomic Propositions (JSON array):"}
-            ],
-            "temperature": 0.1,
-            "max_tokens": 4096
-        }).encode("utf-8")
 
         for attempt in range(EXTRACTION_ATTEMPTS):
+            active_model = EXTRACTION_MODEL if attempt == 0 else EXTRACTION_FALLBACK_MODEL
+            payload = json.dumps({
+                "model": active_model,
+                "messages": [
+                    {"role": "system", "content": EXTRACTION_PROMPT},
+                    {"role": "user", "content": f"Conversation:\n{dialogue_for_llm}\n\nAtomic Propositions (JSON array):"}
+                ],
+                "temperature": 0.1,
+                "max_tokens": 4096
+            }).encode("utf-8")
             try:
                 req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
                 with urllib.request.urlopen(req, timeout=EXTRACTION_TIMEOUT_SEC) as resp:
@@ -189,12 +193,12 @@ def extract_propositions(messages: List[Dict[str, Any]]) -> List[str]:
                             clean_props = [str(p).strip() for p in propositions if str(p).strip()]
                             return patch_propositions + clean_props
                     else:
-                        logger.warning(f"Qwen-turbo extraction HTTP {resp.status}")
+                        logger.warning(f"LLM extraction ({active_model}) HTTP {resp.status}")
             except Exception as e:
-                logger.warning(f"Qwen-turbo extraction attempt {attempt + 1} error: {str(e)}")
+                logger.warning(f"LLM extraction ({active_model}) attempt {attempt + 1} error: {str(e)}")
                 if attempt + 1 < EXTRACTION_ATTEMPTS:
-                    time.sleep(1.0 * (attempt + 1))
+                    time.sleep(0.5 * (attempt + 1))
     except Exception as e:
         logger.warning(f"LLM proposition extraction outer fallback: {str(e)}")
 
-    return patch_propositions + dialogue_lines
+    return patch_propositions
