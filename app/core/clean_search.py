@@ -41,11 +41,15 @@ _MARKER_RE = re.compile(
 )
 
 _FORGET_PAT = re.compile(
-    r"(?:(?:please\s+)?(?:I[’']?ll\s+|I\s+will\s+)?forget(?:\s+(?:my\s+preference\s+about|your\s+preference\s+about|that|the\s+detail\s+about|the\s+preference\s+about|my\s+history\s+of))?"
-    r"|(?:user\s+(?:requested|asked)\s+to\s+forget(?:\s+(?:that|the\s+preference\s+about|the\s+detail\s+about|their\s+preference\s+for|their\s+preference\s+about))?)"
-    r"|(?:assistant\s+(?:confirmed|agreed)\s+(?:to\s+forget|they\s+would\s+forget))"
-    r"|(?:\[Current State\]\s+User\s+has\s+requested\s+to\s+forget))"
-    r"\s*(.*?)(?:\.\s|\.\n|\s*\[|\s*$)",
+    r"\b(?:"
+    r"(?:please\s+|kindly\s+)forget(?:\s+(?:my|your|their|the))?(?:\s+(?:earlier|previous|past))?(?:\s+(?:preference|detail|history|concern|fact))?(?:\s+(?:about|for|of|that))?"
+    r"|(?:I[’']?ll\s+|I\s+will\s+)forget(?:\s+about)?(?:\s+(?:what\s+you\s+mentioned\s+earlier\s+about|my|your|their|the|that\b))?(?:\s+(?:earlier|previous|past))?(?:\s+(?:preference|detail|history|concern|fact))?(?:\s+(?:about|for|of|regarding|that))?"
+    r"|forget\s+(?:my|your|their|the)\s+(?:earlier\s+|previous\s+|past\s+)?(?:preference|detail|history|concern)\s+(?:about|for|of|regarding|that)"
+    r"|forget\s+that\s+I\b"
+    r"|(?:user\s+(?:requested|requests|asked|asks|instructed|instructs|wants|wanted)\s+(?:that\s+)?(?:the\s+assistant\s+)?(?:to\s+)?forget(?:\s+(?:that|their|the|my))?(?:\s+(?:earlier|previous|past))?(?:\s+(?:preference|detail|history|concern|fact))?(?:\s+(?:about|for|of|that))?)"
+    r"|(?:assistant\s+(?:confirmed|confirms|agreed|agrees|acknowledged|acknowledges)\s+(?:that\s+)?(?:(?:it|they)\s+(?:would|will)\s+forget|the\s+request\s+to\s+forget|to\s+forget)(?:\s+(?:that|their|the|my|your))?(?:\s+(?:earlier|previous|past|specific))?(?:\s+(?:preference|detail|history|concern|fact))?(?:\s+(?:about|for|of|that))?)"
+    r"|(?:\[Current State\]\s+User\s+has\s+requested\s+to\s+forget)"
+    r")\s+([^\?\.\n\[]+)",
     re.IGNORECASE,
 )
 
@@ -583,6 +587,51 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     q_core = _leading_date_hdr.sub("", q_stem).strip() or q_stem
     q_full_core = _leading_date_hdr.sub("", query).strip() or query
 
+    # Compact reference-document / multi-turn rule task namespace reconstruction:
+    # When a user namespace consists of a single compact session (<= 15 raw turns) containing
+    # a long reference document / rulebook (>= 3,500 chars, non-trajectory), preserve prior
+    # conversation turns untruncated in chronological order and avoid duplicating the active query turn.
+    doc_raw_rows = [
+        r for r in rows
+        if r.get("item_type") == "raw"
+        and not _STREAMING_TRAJECTORY_PAT.search(r.get("content", ""))
+        and not _STREAMING_FEEDBACK_PAT.search(r.get("content", ""))
+    ]
+    if 1 <= len(doc_raw_rows) <= 15 and max((len(r.get("content", "")) for r in doc_raw_rows), default=0) >= 3500:
+        q_norm_doc = re.sub(r"\W+", " ", query.lower()).strip()
+        prior_doc_raws = []
+        for idx_r, r in enumerate(doc_raw_rows):
+            c_clean = _clean(r.get("content", ""))
+            c_norm_r = re.sub(r"\W+", " ", c_clean.lower()).strip()
+            if len(c_norm_r) > 30 and c_norm_r[:80] in q_norm_doc and len(q_norm_doc) >= len(c_norm_r) * 0.8:
+                continue
+            prior_doc_raws.append((r.get("timestamp") or idx_r, idx_r, r, c_clean))
+        prior_doc_raws.sort(key=lambda x: (x[0], x[1]))
+        doc_out: List[dict] = []
+        doc_total = 0
+        doc_budget = max(byte_budget, 64_000)
+        for _, _, r, c_clean in prior_doc_raws:
+            role_label = r.get("role") or "user"
+            body = f"[{role_label}]: {c_clean}" if len(prior_doc_raws) > 1 else c_clean
+            b_bytes = len(body.encode("utf-8"))
+            if doc_total + b_bytes > doc_budget:
+                avail = doc_budget - doc_total
+                if avail > 1000:
+                    body = body[:avail] + "..."
+                    b_bytes = len(body.encode("utf-8"))
+                else:
+                    continue
+            doc_total += b_bytes
+            doc_out.append({
+                "id": r["memory_id"],
+                "content": body,
+                "text": body,
+                "score": 1.0,
+                "created_at": r.get("created_at"),
+                "timestamp": r.get("timestamp"),
+            })
+        return doc_out
+
     # Lexical ranking
     q_tokens = [w for w in re.findall(r"\w+", q_full_core.lower()) if w not in _STOPWORDS and len(w) > 1]
     lex_query = " ".join(q_tokens) if q_tokens else q_full_core
@@ -899,7 +948,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         c_raw = r["content"]
         if "forget" in c_raw.lower() or "do not remember" in c_raw.lower():
             m = _FORGET_PAT.search(c_raw)
-            if m:
+            if m and not re.search(r"\b(?:don[’']?t|do\s+not|never|not|hard\s+to|can[’']?t|cannot|won[’']?t|shouldn[’']?t)\s+$", c_raw[:m.start()], re.IGNORECASE):
                 topic = m.group(1).strip()
                 topic = re.sub(r"^(?:(?:your|my|their|the)\s+preference\s+(?:about|for)|that\s+(?:I\s+|they\s+|the\s+user\s+)|the\s+detail\s+about\s+)\s*", "", topic, flags=re.IGNORECASE)
                 if len(topic) > 3 and not any(t[1] in topic for t in retracted_topics):
@@ -1243,6 +1292,10 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 if _STREAMING_FEEDBACK_PAT.search(raw_c):
                     continue
                 if not is_streaming_task_q and _STREAMING_TRAJECTORY_PAT.search(raw_c):
+                    continue
+                raw_clean = re.sub(r"\[.*?\]", "", _clean(raw_c).lower()).strip()
+                raw_norm = re.sub(r"\W+", " ", raw_clean).strip()
+                if len(raw_norm) > 30 and (raw_norm[:60] in q_norm or (len(raw_norm) <= 120 and raw_norm in q_norm)):
                     continue
                 c_low = raw_c.lower()
                 if is_video_game_q:
