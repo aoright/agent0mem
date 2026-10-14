@@ -877,7 +877,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         m_spk = re.match(r"^([A-Z][a-z]+):", c_row)
         if m_spk:
             speaker_names.add(m_spk.group(1).lower())
-        for m_intro in re.finditer(r"\bmy\s+name\s+is\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b", c_row):
+        for m_intro in re.finditer(r"\b(?i:my\s+name\s+is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b", c_row):
             intro_names.add(m_intro.group(1).strip().lower())
     intro_tokens: set = set()
     if len(intro_names) == 1:
@@ -1254,12 +1254,6 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         r"|user\s+(?:requested|emphasized)\s+that\s+(?:the\s+assistant\s+)?always\s+([^\.\n]+?)(?:\.|$))",
         re.IGNORECASE
     )
-    speaker_names = {r["role"].lower() for r in rows if r.get("role")}
-    for r in rows:
-        m_spk = re.match(r"^([A-Z][a-z]+):", r.get("content", ""))
-        if m_spk:
-            speaker_names.add(m_spk.group(1).lower())
-
     _RULE_STOP = {
         'the', 'a', 'an', 'in', 'on', 'at', 'by', 'for', 'with', 'from', 'of', 'to',
         'what', 'which', 'is', 'was', 'are', 'were', 'i', 'my', 'me', 'you', 'your', 'when', 'about',
