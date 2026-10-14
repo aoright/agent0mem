@@ -84,7 +84,7 @@ _CHRONO_Q_PAT = re.compile(
     r"|\bchronology\s+of\b"
     r"|\bconsecutive\s+steps?\b"
     r"|\bfirst\s+step\b|\bsecond\s+step\b"
-    r"|先后|顺序|时间线|按时间|哪一步|第一步|第二步)",
+    r"|先后|顺序|时间线|按时间|哪一步|第一步|第二步|最初|最终)",
     re.IGNORECASE,
 )
 
@@ -562,7 +562,6 @@ def _build_index(user_id: str) -> tuple:
         for r in all_rows
         if r.get("item_type") == "raw" and r.get("content")
     }
-    is_script_session = any("[Time: Unknown]" in r.get("content", "") for r in all_rows[:20])
     rows: List[dict] = []
     for r in all_rows:
         if r.get("item_type") == "proposition":
@@ -574,7 +573,7 @@ def _build_index(user_id: str) -> tuple:
                     re.IGNORECASE,
                 )
             )
-            if is_script_session or is_fallback_prefix or (_norm_for_dedup(c_str) in raw_norms and len(_norm_for_dedup(c_str)) >= 15):
+            if is_fallback_prefix or (_norm_for_dedup(c_str) in raw_norms and len(_norm_for_dedup(c_str)) >= 15):
                 continue
         rows.append(r)
     if not rows and all_rows:
