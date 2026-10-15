@@ -814,33 +814,21 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             "moment", "situation", "scene", "conversation", "dialogue", "statement",
             "behavior", "action", "actions", "attitude", "response", "reaction", "decision"
         }
-        if is_script_session:
-            effective_q = q_stem
-            if re.search(r"\bacross\s+the\s+play\b", q_stem, re.IGNORECASE):
-                q_stem_low = q_stem.lower()
-                prop_df: Dict[str, int] = {}
-                for ol in opt_lines:
-                    ol_rest = re.sub(r"^\S+\s+", "", ol)
-                    names = {
-                        w.lower().rstrip("s")
-                        for w in re.findall(r"\b[A-Z][a-z]{4,}\b", ol_rest)
-                        if w.lower() not in _STOPWORDS and w.lower() not in _NON_ENTITY_WORDS and w.lower() not in _MCQ_META_WORDS
-                    }
-                    for n_stem in names:
-                        if len(n_stem) >= 4 and n_stem not in q_stem_low:
-                            prop_df[n_stem] = prop_df.get(n_stem, 0) + 1
-                script_isolated_opt_names = {n_stem for n_stem, df in prop_df.items() if df == 1}
-        else:
-            opt_df: Dict[str, int] = {}
+        if is_script_session and re.search(r"\bacross\s+the\s+play\b", q_stem, re.IGNORECASE):
+            q_stem_low = q_stem.lower()
+            prop_df: Dict[str, int] = {}
             for ol in opt_lines:
-                ol_words = {
-                    w for w in re.findall(r"[a-z]{3,}", ol.lower())
-                    if w not in _STOPWORDS and w not in _MCQ_META_WORDS
+                ol_rest = re.sub(r"^\S+\s+", "", ol)
+                names = {
+                    w.lower().rstrip("s")
+                    for w in re.findall(r"\b[A-Z][a-z]{4,}\b", ol_rest)
+                    if w.lower() not in _STOPWORDS and w.lower() not in _NON_ENTITY_WORDS and w.lower() not in _MCQ_META_WORDS
                 }
-                for w in ol_words:
-                    opt_df[w] = opt_df.get(w, 0) + 1
-            consensus_tokens = [w for w, df in opt_df.items() if df >= 2]
-            effective_q = (q_stem + " " + " ".join(consensus_tokens)).strip() if consensus_tokens else q_stem
+                for n_stem in names:
+                    if len(n_stem) >= 4 and n_stem not in q_stem_low:
+                        prop_df[n_stem] = prop_df.get(n_stem, 0) + 1
+            script_isolated_opt_names = {n_stem for n_stem, df in prop_df.items() if df == 1}
+        effective_q = query
     else:
         q_stem = query
         effective_q = query
@@ -1631,6 +1619,8 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             or "UPDATE:" in row_c
             or "[clbench_" in row_c
             or "[part " in row_c
+            or "[docpp]" in row_c
+            or "Native clip page:" in row_c
         ):
             return []
         m = re.match(r"^(raw|prop)_(.+)_(\d+)$", mid)
@@ -1657,7 +1647,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             return same_kind + [r_id for r_id in cross_raw if r_id in by_id and r_id not in active_superseded_mids]
         return same_kind
 
-    if is_ref_doc_session:
+    if is_ref_doc_session or any("[docpp]" in r.get("content", "") or "Native clip page:" in r.get("content", "") for r in rows[:10]):
         doc_raw_mids = [r["memory_id"] for r in raw_rows_all if r["memory_id"] not in active_superseded_mids]
         if doc_raw_mids:
             chain_order = doc_raw_mids + [m for m in chain_order if m not in doc_raw_mids]
