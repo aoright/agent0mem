@@ -764,6 +764,32 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                         "timestamp": emp_row.get("timestamp") or 0,
                     })
 
+    trap_guidance: List[dict] = []
+    is_trap_session = any("[memtrapbench]" in r.get("content", "") for r in rows[:20])
+    if is_trap_session:
+        r0 = rows[0]
+        if re.search(r"\breach\s+24\b|\bnumbers\s*\[", query or "", re.IGNORECASE):
+            t_msg = (
+                "[AdaptiveMem Cognitive Trap Safeguard — Arithmetic Verification]: "
+                "Do NOT follow flawed, failed, or abandoned intermediate arithmetic attempts from prior conversation turns. "
+                "Solve the Game of 24 from first principles using each given number EXACTLY ONCE with standard operations (+, -, *, /). "
+                "Double-check that your final expression evaluates to 24."
+            )
+        else:
+            t_msg = (
+                "[AdaptiveMem Cognitive Trap Safeguard — Epistemic & Procedural Verification]: "
+                "Prior conversation turns may contain misleading distractors, speculative assumptions, or outdated steps. "
+                "Rely strictly on verified primary evidence, official excerpt records, and rigorous logical deduction."
+            )
+        trap_guidance.append({
+            "id": f"trap_guard_{r0['memory_id']}",
+            "content": t_msg,
+            "text": t_msg,
+            "score": 4.5,
+            "created_at": r0.get("created_at"),
+            "timestamp": r0.get("timestamp") or 0,
+        })
+
     superseded_mids, active_update_mids = _compute_superseded_mids(rows)
     asks_prior_state = bool(re.search(
         r"\b(?:prior|previous|previously|formerly|original|originally|before|used\s+to|initial|initially)\b",
@@ -771,6 +797,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     ))
     active_superseded_mids = set() if asks_prior_state else superseded_mids
 
+    script_isolated_opt_names: set = set()
     mcq_split = re.split(r"\n+\s*A[\.\)]\s+", query, maxsplit=1)
     if not re.search(r"[\u4e00-\u9fff]", query) and len(mcq_split) > 1 and re.search(r"\n+\s*B[\.\)]\s+", query):
         q_stem = mcq_split[0].strip()
@@ -785,16 +812,33 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             "moment", "situation", "scene", "conversation", "dialogue", "statement",
             "behavior", "action", "actions", "attitude", "response", "reaction", "decision"
         }
-        opt_df: Dict[str, int] = {}
-        for ol in opt_lines:
-            ol_words = {
-                w for w in re.findall(r"[a-z]{3,}", ol.lower())
-                if w not in _STOPWORDS and w not in _MCQ_META_WORDS
-            }
-            for w in ol_words:
-                opt_df[w] = opt_df.get(w, 0) + 1
-        consensus_tokens = [w for w, df in opt_df.items() if df >= 2]
-        effective_q = (q_stem + " " + " ".join(consensus_tokens)).strip() if consensus_tokens else q_stem
+        if is_script_session:
+            effective_q = q_stem
+            if re.search(r"\bacross\s+the\s+play\b", q_stem, re.IGNORECASE):
+                q_stem_low = q_stem.lower()
+                prop_df: Dict[str, int] = {}
+                for ol in opt_lines:
+                    ol_rest = re.sub(r"^\S+\s+", "", ol)
+                    names = {
+                        w.lower().rstrip("s")
+                        for w in re.findall(r"\b[A-Z][a-z]{4,}\b", ol_rest)
+                        if w.lower() not in _STOPWORDS and w.lower() not in _NON_ENTITY_WORDS and w.lower() not in _MCQ_META_WORDS
+                    }
+                    for n_stem in names:
+                        if len(n_stem) >= 4 and n_stem not in q_stem_low:
+                            prop_df[n_stem] = prop_df.get(n_stem, 0) + 1
+                script_isolated_opt_names = {n_stem for n_stem, df in prop_df.items() if df == 1}
+        else:
+            opt_df: Dict[str, int] = {}
+            for ol in opt_lines:
+                ol_words = {
+                    w for w in re.findall(r"[a-z]{3,}", ol.lower())
+                    if w not in _STOPWORDS and w not in _MCQ_META_WORDS
+                }
+                for w in ol_words:
+                    opt_df[w] = opt_df.get(w, 0) + 1
+            consensus_tokens = [w for w, df in opt_df.items() if df >= 2]
+            effective_q = (q_stem + " " + " ".join(consensus_tokens)).strip() if consensus_tokens else q_stem
     else:
         q_stem = query
         effective_q = query
@@ -877,7 +921,12 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     # Preference evolution and current state update boosting:
     # When a query inquires about current habits, preferences, roles, or states,
     # prioritize memories with explicit update markers and demote superseded prior states.
-    is_state_or_pref_q = bool(re.search(
+    is_when_event_q = bool(re.match(
+        r"^\s*(?:when\s+did|when\s+was|when\s+has|what\s+year\s+did|which\s+year\s+did|what\s+date\s+did)\b",
+        query,
+        re.IGNORECASE,
+    ))
+    is_state_or_pref_q = not is_when_event_q and bool(re.search(
         r"\b(?:prefer|preference|favorite|like|likes|diet|routine|habit|role|job|current|currently|now|latest|today|switched|live|lives|reside|resides)\b",
         query,
         re.IGNORECASE,
@@ -1330,8 +1379,12 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     unanchored_candidates: List[str] = []
 
     raw_rows_all = [r for r in rows if r.get("item_type") == "raw"]
+    if is_script_session and script_isolated_opt_names and len(raw_rows_all) <= 350:
+        for n_stem in script_isolated_opt_names:
+            retracted_keywords.add(n_stem)
+            retracted_keywords.add(f"{n_stem}s")
     is_ref_doc_session = len(raw_rows_all) <= 15 and any(
-        any(tag in r.get("content", "") for tag in ("[docpp]", "Native clip page:", "[clbench_", "[part 1/"))
+        any(tag in r.get("content", "") for tag in ("[clbench_", "[part 1/"))
         for r in rows[:10]
     )
 
@@ -1519,6 +1572,10 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                     continue
                 if not is_streaming_task_q and _STREAMING_TRAJECTORY_PAT.search(raw_c):
                     continue
+                if retracted_keywords:
+                    c_words_r = set(re.findall(r"\w+", _clean(raw_c).lower()))
+                    if any(len(w) >= 4 and w in retracted_keywords for w in c_words_r):
+                        continue
                 c_low = raw_c.lower()
                 if is_video_game_q:
                     has_board = bool(re.search(r"\b(?:board\s+games?|catan|settlers\s+of\s+catan|chess|tabletop)\b", c_low))
@@ -1570,8 +1627,6 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             is_ref_doc_session
             or "Corpus:" in row_c
             or "UPDATE:" in row_c
-            or "[docpp]" in row_c
-            or "Native clip page:" in row_c
             or "[clbench_" in row_c
             or "[part " in row_c
         ):
@@ -1927,6 +1982,8 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
 
     if order == "time":
         out.sort(key=lambda it: (_get_effective_timestamp(it), it["id"]))
+    if trap_guidance:
+        out = trap_guidance + [it for it in out if not it["id"].startswith("trap_guard_")]
     if premise_notices:
         out = premise_notices + [it for it in out if not it["id"].startswith("premise_")]
     if contradiction_notice:

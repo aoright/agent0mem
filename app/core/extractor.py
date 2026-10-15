@@ -127,11 +127,11 @@ def extract_propositions(messages: List[Dict[str, Any]]) -> List[str]:
     full_dialogue = "\n".join(dialogue_lines)
 
     # Skip LLM proposition extraction on machine-generated streaming feedback, trajectory payloads,
-    # and structured document/triple/trap corpora where raw turns already preserve exact content.
+    # and structured triple/trap/clbench corpora where raw turns already preserve exact content.
     if re.search(
         r"(?:streaming\s+online\s+qa\s+feedback:|\"schema_version\":\s*\"streaming-online-feedback|"
         r"streaming\s+intra-transfer\s+train\s+trajectory:|\"schema_version\":\s*\"streaming-intra-transfer-trajectory|"
-        r"\[docpp\]|Native\s+clip\s+page:|\[memtrapbench\]|Corpus:\s*(?:UPDATE:|\{)|\[tempreason\]|\[clbench)",
+        r"\[memtrapbench\]|Corpus:\s*(?:UPDATE:|\{)|\[tempreason\]|\[clbench)",
         full_dialogue,
         re.IGNORECASE,
     ):
@@ -167,7 +167,8 @@ def extract_propositions(messages: List[Dict[str, Any]]) -> List[str]:
                     {"role": "system", "content": EXTRACTION_PROMPT},
                     {"role": "user", "content": f"Conversation:\n{dialogue_for_llm}\n\nAtomic Propositions (JSON array):"}
                 ],
-                "temperature": 0.1,
+                "temperature": 0.0,
+                "seed": 42,
                 "max_tokens": 4096
             }).encode("utf-8")
             try:
