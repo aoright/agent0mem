@@ -142,6 +142,14 @@ def get_connection() -> sqlite3.Connection:
 
 def init_db():
     with get_db() as conn:
+        existing = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table', 'index')"
+            ).fetchall()
+        }
+        if {"memories", "embeddings", "idx_mem_user", "idx_mem_time", "idx_mem_type"}.issubset(existing):
+            return
         conn.execute("""
             CREATE TABLE IF NOT EXISTS memories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
