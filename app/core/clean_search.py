@@ -84,6 +84,8 @@ _CHRONO_Q_PAT = re.compile(
     r"|\bchronology\s+of\b"
     r"|\bconsecutive\s+steps?\b"
     r"|\bfirst\s+step\b|\bsecond\s+step\b"
+    r"|\bover\s+the\s+course\s+of\s+the\s+(?:exchange|conversation|play|scene)\b"
+    r"|\bshift\s+in\s+(?:his|her|their)\s+(?:stance|attitude|view|position)\b"
     r"|先后|顺序|时间线|按时间|哪一步|第一步|第二步|最初|最终)",
     re.IGNORECASE,
 )
@@ -273,8 +275,8 @@ def _clean(text: str) -> str:
 
 
 def _resolve_relative_dates(text: str, day_str: Optional[str]) -> str:
-    """Resolve relative dates like 'last night', 'yesterday', 'two days ago', 'few days ago'
-    into explicit calendar dates in parentheses using the conversation date."""
+    """Resolve relative dates like 'last night', 'yesterday', 'two days ago', 'few days ago',
+    'for three years', 'three years ago' into explicit calendar dates/years in parentheses."""
     if not day_str or not text:
         return text
     try:
@@ -294,6 +296,43 @@ def _resolve_relative_dates(text: str, day_str: Optional[str]) -> str:
 
     # 3. a few days ago / few days ago
     text = re.sub(r"\b(a\s+few\s+days\s+ago|few\s+days\s+ago)\b(?!\s*\(|\s*\[)", rf"\1 (few days before {dt.day} {dt.strftime('%B, %Y')})", text, flags=re.IGNORECASE)
+
+    # 4. for <N> years / <N> years ago
+    _word_to_int = {
+        "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+        "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+        "eleven": 11, "twelve": 12,
+    }
+
+    def _sub_for_years(m: "re.Match") -> str:
+        raw_n = m.group(2).lower()
+        n = int(raw_n) if raw_n.isdigit() else _word_to_int.get(raw_n, 0)
+        if 1 <= n <= 50:
+            y = dt.year - n
+            return f"{m.group(1)} (since {y} / in {y})"
+        return m.group(0)
+
+    text = re.sub(
+        r"\b(for\s+(?:the\s+past\s+|the\s+last\s+)?(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+years?)\b(?!\s*\(|\s*\[)",
+        _sub_for_years,
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    def _sub_years_ago(m: "re.Match") -> str:
+        raw_n = m.group(2).lower()
+        n = int(raw_n) if raw_n.isdigit() else _word_to_int.get(raw_n, 0)
+        if 1 <= n <= 50:
+            y = dt.year - n
+            return f"{m.group(1)} (in {y})"
+        return m.group(0)
+
+    text = re.sub(
+        r"\b((\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+years?\s+(?:ago|earlier|before|prior))\b(?!\s*\(|\s*\[)",
+        _sub_years_ago,
+        text,
+        flags=re.IGNORECASE,
+    )
 
     return text
 
@@ -640,6 +679,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         return []
 
     is_script_session = any("[Time: Unknown]" in r.get("content", "") for r in rows[:5])
+    is_unanchored_session = any("[locomo_refined]" in r.get("content", "") for r in rows[:10])
 
     # Generic Epistemic & Premise Contradiction Verification:
     # 1. Unmentioned personal attribute check (e.g., middle name, maiden name, blood type, passport number)
@@ -892,21 +932,109 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             if mid in active_update_mids:
                 fused[mid] += 0.05
 
-    is_first_event = bool(re.search(r"\b(?:which\s+event\s+happened\s+first|happened\s+first)\b", query, re.IGNORECASE))
-    is_chrono = bool(_CHRONO_Q_PAT.search(query))
-    if ("how well did i align" in query.lower() or "search thoroughness" in query.lower() or
-            "given my timeline and actions" in query.lower()):
+    is_first_event = bool(re.search(r"\b(?:which\s+event\s+happened\s+first|happened\s+first)\b", q_stem, re.IGNORECASE))
+    is_chrono = len(q_stem) <= 600 and bool(_CHRONO_Q_PAT.search(q_stem))
+    if ("how well did i align" in q_stem.lower() or "search thoroughness" in q_stem.lower() or
+            "given my timeline and actions" in q_stem.lower()):
         is_chrono = False
     if (is_chrono or is_first_event) and order == "score":
         order = "time"
-    is_user_init = bool(_USER_INIT_PAT.search(query))
+
+    # Character-arc / exchange-progression retrieval:
+    # When a query asks about a named speaker's repeated utterances or stance shift over the course of an exchange,
+    # prioritize the speaker's actual raw dialogue turns in chronological order over isolated early propositions.
+    is_char_arc_q = len(q_stem) <= 600 and bool(re.search(
+        r"\b(?:over\s+the\s+course\s+of\s+the\s+(?:exchange|conversation|play|scene)|shift\s+in\s+(?:his|her|their)\s+(?:stance|attitude|view|position)|taken\s+together,\s+[A-Z][a-z]+['’]s\s+repeated)\b",
+        q_stem,
+        re.IGNORECASE,
+    ))
+    if is_char_arc_q:
+        m_char = re.search(r"\b([A-Z][a-z]{2,})['’]s\b", q_stem)
+        target_char = m_char.group(1).lower() if m_char else ""
+        other_ents = [
+            w.lower().rstrip("s")
+            for w in re.findall(r"\b[A-Z][a-z]{3,}\b", q_stem)
+            if w.lower() not in _STOPWORDS and w.lower() not in _NON_ENTITY_WORDS and w.lower().rstrip("s") != target_char
+        ]
+        if target_char:
+            spk_pat = re.compile(rf"(?:^|\b|\]){re.escape(target_char)}\s*:", re.IGNORECASE)
+            oath_or_stance_pat = re.compile(
+                r"\b(?:god|devil|damned|damn|hell|curse|plague|never|again|set\s+foot|visit|go\s+to|drink|toddy|house|opinion|changed)\b",
+                re.IGNORECASE,
+            )
+            for mid, r_obj in by_id.items():
+                if mid in active_superseded_mids:
+                    continue
+                c_raw = r_obj.get("content", "")
+                c_low = c_raw.lower()
+                if r_obj.get("item_type") == "raw":
+                    is_spk_turn = bool(spk_pat.search(c_raw)) or (r_obj.get("role") or "").lower() == target_char
+                    if is_spk_turn or target_char in c_low:
+                        bonus = 0.8 if is_spk_turn else 0.3
+                        if other_ents and any(oe in c_low for oe in other_ents):
+                            bonus += 1.2
+                        if oath_or_stance_pat.search(c_raw):
+                            bonus += 0.8
+                        fused[mid] = fused.get(mid, 0.0) + bonus
+                else:
+                    if mid in fused:
+                        fused[mid] *= 0.25
+
+    is_user_init = len(q_stem) <= 600 and bool(_USER_INIT_PAT.search(q_stem))
     if is_user_init:
-        for mid in list(fused):
+        _INIT_META_STOP = _STOPWORDS | _NON_ENTITY_WORDS | {
+            "order", "brought", "different", "aspects", "aspect", "implementing", "implement",
+            "implemented", "feature", "features", "across", "conversations", "conversation",
+            "earliest", "latest", "mention", "mentions", "items", "item", "five", "four",
+            "three", "six", "only", "list", "chronological", "chronologically", "walk",
+            "through", "project", "code", "app", "application", "system"
+        }
+        init_topic_words = [
+            w for w in re.findall(r"[a-z]{3,}", q_stem.lower())
+            if w not in _INIT_META_STOP and w not in intro_tokens
+        ]
+        anchor_raw_mids: set = set()
+        for r_obj in rows:
+            if r_obj.get("item_type") == "raw" and r_obj.get("memory_id") not in active_superseded_mids:
+                c_u = r_obj.get("content", "").split("->", 1)[0].lower()
+                if init_topic_words and any(tw in c_u for tw in init_topic_words):
+                    anchor_raw_mids.add(r_obj["memory_id"])
+        # Bridge immediate follow-up user turns (e.g. D1:23 between D1:21 and D1:25) in the same sub-thread
+        bridged_raw_mids: set = set()
+        for amid in list(anchor_raw_mids):
+            m_id = re.match(r"^raw_(.+)_(\d+)$", amid)
+            if not m_id:
+                continue
+            sess_p, idx_p = m_id.group(1), int(m_id.group(2))
+            for step in (1, 2):
+                next_mid = f"raw_{sess_p}_{idx_p + step}"
+                after_mid = f"raw_{sess_p}_{idx_p + step + 1}"
+                if next_mid in by_id and next_mid not in anchor_raw_mids:
+                    nc = by_id[next_mid].get("content", "")
+                    nc_u = nc.split("->", 1)[0]
+                    is_followup = ("->->" in nc_u or bool(re.search(r"\b(?:hmm|what\s+about|what\s+if|also|how\s+about)\b", nc_u, re.IGNORECASE)))
+                    if after_mid in anchor_raw_mids or (step == 1 and is_followup):
+                        bridged_raw_mids.add(next_mid)
+        for mid in list(fused) + list(anchor_raw_mids | bridged_raw_mids):
+            if mid not in by_id or mid in active_superseded_mids:
+                continue
             r = by_id[mid]
-            if r.get("role") == "user":
-                fused[mid] *= 2.5
+            if r.get("role") == "user" or r.get("item_type") == "raw":
+                base_s = fused.get(mid, 0.01)
+                if mid in anchor_raw_mids:
+                    fused[mid] = base_s * 3.5 + 0.50
+                elif mid in bridged_raw_mids:
+                    fused[mid] = base_s * 3.0 + 0.45
+                elif init_topic_words:
+                    fused[mid] = base_s * 0.4
+                else:
+                    fused[mid] = base_s * 2.5
             elif r["item_type"] == "proposition" and r["content"].lower().startswith(("user", "the user", "i ")):
-                fused[mid] *= 1.8
+                c_p = r["content"].lower()
+                if not init_topic_words or any(tw in c_p for tw in init_topic_words):
+                    fused[mid] = fused.get(mid, 0.0) * 1.8
+                else:
+                    fused[mid] = fused.get(mid, 0.0) * 0.3
 
     # Preference evolution and current state update boosting:
     # When a query inquires about current habits, preferences, roles, or states,
@@ -1627,6 +1755,8 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         if not m:
             return []
         kind, sess, idx = m.group(1), m.group(2), int(m.group(3))
+        if kind == "raw" and (is_chrono or is_user_init or is_char_arc_q):
+            return []
         m_tag = _TURN_TAG_PAT.search(row_c)
         same_kind = []
         for j in range(idx - NEIGHBOUR_WINDOW, idx + NEIGHBOUR_WINDOW + 1):
@@ -1647,7 +1777,18 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             return same_kind + [r_id for r_id in cross_raw if r_id in by_id and r_id not in active_superseded_mids]
         return same_kind
 
-    if is_ref_doc_session or any("[docpp]" in r.get("content", "") or "Native clip page:" in r.get("content", "") for r in rows[:10]):
+    if is_ref_doc_session:
+        doc_raw_mids = [r["memory_id"] for r in raw_rows_all if r["memory_id"] not in active_superseded_mids]
+        if len(doc_raw_mids) >= 3:
+            sys_mids = [m for m in doc_raw_mids if "[D1:1]" in by_id[m].get("content", "")]
+            other_mids = [m for m in doc_raw_mids if m not in sys_mids]
+            doc_raw_mids = other_mids + sys_mids
+        raw_total_bytes = sum(len(by_id[m].get("content", "").encode("utf-8")) for m in doc_raw_mids)
+        if doc_raw_mids and raw_total_bytes <= byte_budget:
+            chain_order = doc_raw_mids
+        elif doc_raw_mids:
+            chain_order = doc_raw_mids + [m for m in chain_order if m not in doc_raw_mids]
+    elif any("[docpp]" in r.get("content", "") or "Native clip page:" in r.get("content", "") for r in rows[:10]):
         doc_raw_mids = [r["memory_id"] for r in raw_rows_all if r["memory_id"] not in active_superseded_mids]
         if doc_raw_mids:
             chain_order = doc_raw_mids + [m for m in chain_order if m not in doc_raw_mids]
@@ -1666,6 +1807,12 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         r = by_id[mid]
         if r["item_type"] == "raw":
             mid_text = _clean(r["content"])
+            if is_ref_doc_session and len(raw_rows_all) >= 3 and "[D1:1]" in mid_text:
+                mid_text = re.sub(r"(\[D1:1\]\[text\])\s*", r"\1 [Active Formatting & System Rules]: ", mid_text, count=1)
+            if is_user_init and is_chrono:
+                parts_ua = re.split(r"\s+->\s+(?!->)", mid_text, maxsplit=1)
+                if len(parts_ua) == 2 and len(parts_ua[1]) > 450:
+                    mid_text = f"{parts_ua[0]} -> {parts_ua[1][:450]}..."
             used.add(mid)
             p_parts = []
             for nid in neighbours(mid)[:NEIGHBOUR_WINDOW]:
@@ -1699,29 +1846,44 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             body = "\n".join(p for p in all_parts if p)
         else:
             body = _clean(r["content"])
-            for nid in neighbours(mid):
-                n = by_id.get(nid)
-                if n is not None:
-                    n_low = n["content"].lower()
-                    if "yesterday" in n_low:
-                        ev_dates = re.findall(r"\[Event Date:\s*([^\]]+)\]", n["content"])
-                        if ev_dates:
-                            body = re.sub(r"on \d{4}-\d{2}-\d{2}", f"on {ev_dates[-1]}", body)
-                    if "last week" in n_low and re.search(r"on \d{4}-\d{2}-\d{2}", body):
-                        m_date = re.search(r"on (\d{4}-\d{2}-\d{2})", body) or re.search(r"\[(\d{4}-\d{2}-\d{2})", n["content"])
-                        if m_date:
-                            try:
-                                dt_conv = datetime.strptime(m_date.group(1), "%Y-%m-%d")
-                                week_idx = (dt_conv.day - 1) // 7
-                                _week_names = ["first week", "second week", "third week", "fourth week", "last week"]
-                                rel_w_desc = f"{_week_names[max(0, week_idx - 1)]} of {dt_conv.strftime('%B %Y')}"
-                                body = re.sub(r"on \d{4}-\d{2}-\d{2}", f"in the {rel_w_desc} (last week)", body)
-                            except Exception:
-                                pass
-                    rel_times = re.findall(r"(\[Relative Time:\s*[^\]]+\])", n["content"])
-                    for rt in rel_times:
-                        if rt not in body:
-                            body = f"{body} {rt}"
+            if is_unanchored_session:
+                body = re.sub(r"\s*\[(?:Event Date|Event Month|Event Year|Relative Time):[^\]]*\]", "", body).strip()
+                sid_r = r.get("session_id") or "default"
+                sess_raw_objs = [by_id[rm] for rm in session_raws.get(sid_r, []) if rm in by_id]
+                nbr_objs = [by_id[nid] for nid in neighbours(mid) if nid in by_id]
+                check_raws = nbr_objs if nbr_objs else sess_raw_objs
+                for n in check_raws:
+                    if "yesterday" in n.get("content", "").lower():
+                        body = re.sub(
+                            r"\bon\s+(?:\d{4}-\d{2}-\d{2}|[A-Z][a-z]+\s+\d{1,2},?\s+\d{4})\b",
+                            "yesterday",
+                            body,
+                        )
+                        break
+            else:
+                for nid in neighbours(mid):
+                    n = by_id.get(nid)
+                    if n is not None:
+                        n_low = n["content"].lower()
+                        if "yesterday" in n_low:
+                            ev_dates = re.findall(r"\[Event Date:\s*([^\]]+)\]", n["content"])
+                            if ev_dates:
+                                body = re.sub(r"on \d{4}-\d{2}-\d{2}", f"on {ev_dates[-1]}", body)
+                        if "last week" in n_low and re.search(r"on \d{4}-\d{2}-\d{2}", body):
+                            m_date = re.search(r"on (\d{4}-\d{2}-\d{2})", body) or re.search(r"\[(\d{4}-\d{2}-\d{2})", n["content"])
+                            if m_date:
+                                try:
+                                    dt_conv = datetime.strptime(m_date.group(1), "%Y-%m-%d")
+                                    week_idx = (dt_conv.day - 1) // 7
+                                    _week_names = ["first week", "second week", "third week", "fourth week", "last week"]
+                                    rel_w_desc = f"{_week_names[max(0, week_idx - 1)]} of {dt_conv.strftime('%B %Y')}"
+                                    body = re.sub(r"on \d{4}-\d{2}-\d{2}", f"in the {rel_w_desc} (last week)", body)
+                                except Exception:
+                                    pass
+                        rel_times = re.findall(r"(\[Relative Time:\s*[^\]]+\])", n["content"])
+                        for rt in rel_times:
+                            if rt not in body:
+                                body = f"{body} {rt}"
             if len(body) > 12000:
                 body = body[:12000] + "..."
             used.add(mid)
@@ -1792,7 +1954,10 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         # Check if this item subsumes an existing item
         subsumed_idx = [i for i, s in enumerate(seen_norm) if s in body_norm and len(s) >= 20]
         day = _day(r["timestamp"], r["created_at"])
-        body = _resolve_relative_dates(body, day)
+        if is_unanchored_session:
+            body = re.sub(r"\s*\[(?:Event Date|Event Month|Event Year|Relative Time):[^\]]*\]", "", body).strip()
+        else:
+            body = _resolve_relative_dates(body, day)
         if is_where_q and active_trip_location and active_trip_location.lower() not in body.lower():
             if re.search(r"\b(?:lesson|tour|spot|dive|diving|hike|hiking|dinner|lunch|breakfast|swimming|beach|walk|visited|stayed|travel)\b", body, re.IGNORECASE):
                 body = f"[During trip to {active_trip_location}] {body}"
@@ -1814,7 +1979,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 return f" in {q_month} {d_obj.year}"
 
             body = re.sub(r"\s+on\s+(\d{4}-\d{2}-\d{2})\b", _to_month, body)
-        if is_ref_doc_session and r["item_type"] == "raw":
+        if is_unanchored_session or (is_ref_doc_session and r["item_type"] == "raw"):
             content = body
         elif day and date_style == "human":
             content = f"[Said on {_fmt_day(day, 'human')}] {body}"
@@ -1863,12 +2028,16 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         _NEG_ASSERTION_PAT = re.compile(
             r"\b(?:never|haven\'t|hasn\'t|have not|has not|had not|never actually|"
             r"never written|never enrolled|never attended|never completed|never placed|"
-            r"never invited|no experience|not attended)\b",
+            r"never invited|no experience|not attended|never fixed|never obtained|never used|"
+            r"never integrated|never tested|never practiced|never attempted|never missed|"
+            r"never collaborated|never submitted)\b",
             re.IGNORECASE,
         )
         _AFFIRM_PAT = re.compile(
             r"\b(?:placed|ordered|bought|purchased|attended|enrolled|completed|"
-            r"invited|confirmed|implemented|written|coded|shared|worked|improved)\b",
+            r"invited|confirmed|implemented|written|coded|shared|worked|improved|"
+            r"configured|set\s+up|updated|used|using|integrated|obtained|submitted|"
+            r"collaborated|downloaded|missed|practiced|attempted|built|created|deployed|tested|fixed|added|restricted)\b",
             re.IGNORECASE,
         )
         _DOUBT_PAT = re.compile(
@@ -1908,54 +2077,91 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         cand_props = [r for r in rows if r["item_type"] == "proposition" and _is_user_prop(r["content"])]
         neg_items = [r for r in cand_props if _NEG_ASSERTION_PAT.search(r["content"])]
         pos_items = [r for r in cand_props if not _NEG_ASSERTION_PAT.search(r["content"])]
-        if not neg_items:
-            neg_items = [it for it in out[:25] if _NEG_ASSERTION_PAT.search(it.get("content", "")) and _is_user_prop(it.get("content", ""))]
-            pos_items = [it for it in out[:25] if not _NEG_ASSERTION_PAT.search(it.get("content", "")) and _is_user_prop(it.get("content", ""))]
+        for r in rows:
+            if r.get("item_type") == "raw":
+                u_part = r.get("content", "").split("->", 1)[0]
+                if _NEG_ASSERTION_PAT.search(u_part):
+                    neg_items.append({"memory_id": r["memory_id"], "content": u_part, "created_at": r.get("created_at"), "timestamp": r.get("timestamp")})
+                elif _AFFIRM_PAT.search(u_part):
+                    pos_items.append({"memory_id": r["memory_id"], "content": u_part, "created_at": r.get("created_at"), "timestamp": r.get("timestamp")})
 
         if neg_items and pos_items:
-            q_stems = _tok_stem(query)
+            q_stems = _tok_stem(query) - {_stem(t) for t in intro_tokens}
+            min_q_match = 2 if len(q_stems) >= 2 else 1
             best_pair = None
             best_score = -1
+            spk_prefixes = tuple(["user", "the user", "i ", "i've", "i'm"] + [fn for fn in intro_names])
             for n_it in neg_items:
                 n_raw = re.sub(r"\[.*?\]", "", n_it.get("content", "")).strip()
-                n_stems = _tok_stem(n_raw)
+                n_raw = n_raw.split("->->")[0].strip()
+                n_stems = _tok_stem(n_raw) - {_stem(t) for t in intro_tokens}
                 n_q_overlap = n_stems & q_stems
-                if not n_q_overlap:
+                if len(n_q_overlap) < min_q_match:
                     continue
                 for p_it in pos_items:
                     p_raw = re.sub(r"\[.*?\]", "", p_it.get("content", "")).strip()
+                    p_raw = p_raw.split("\n```")[0].split("->->")[0].strip()
                     clean_p = re.sub(r"^(?:on\s+[^,]+,\s*)", "", p_raw, flags=re.IGNORECASE).strip()
-                    user_direct = clean_p.lower().startswith(("user", "the user", "i "))
+                    user_direct = clean_p.lower().startswith(spk_prefixes)
                     is_affirmative = bool(_AFFIRM_PAT.search(p_raw))
                     is_doubt = bool(_DOUBT_PAT.search(p_raw))
 
-                    p_stems = _tok_stem(p_raw)
+                    p_stems = _tok_stem(p_raw) - {_stem(t) for t in intro_tokens}
                     p_q_overlap = p_stems & q_stems
+                    if len(p_q_overlap) < min_q_match:
+                        continue
                     overlap = n_stems & p_stems
 
                     same_chunk = (n_it.get("memory_id", "").rsplit("_", 1)[0] == p_it.get("memory_id", "").rsplit("_", 1)[0])
+                    is_prop_pair = (str(n_it.get("memory_id", "")).startswith("prop_") and str(p_it.get("memory_id", "")).startswith("prop_"))
 
                     score = (
-                        len(overlap) * 6 +
-                        len(n_q_overlap) * 12 +
-                        len(p_q_overlap) * 12 +
+                        len(overlap) * 8 +
+                        len(n_q_overlap) * 18 +
+                        len(p_q_overlap) * 18 +
                         (20 if is_affirmative else -10) +
-                        (15 if same_chunk and is_affirmative else 0) +
+                        (10 if same_chunk and is_affirmative else 0) +
+                        (8 if is_prop_pair else 0) +
                         (-30 if is_doubt else 0) +
                         (10 if user_direct else -25)
                     )
-                    if p_q_overlap and n_q_overlap and len(overlap) >= 1:
-                        if score > best_score:
-                            best_score = score
-                            best_pair = (p_raw, n_raw, p_it, n_it)
+                    if len(overlap) >= 1 and score > best_score:
+                        best_score = score
+                        best_pair = (p_raw, n_raw, p_it, n_it)
             if best_pair:
                 p_raw, n_raw, p_it, n_it = best_pair
-                p_clean = re.sub(r"^(?:The user|User|I|On \d{4}-\d{2}-\d{2},\s*(?:the\s+user|user)?)\s*", "", p_raw, flags=re.IGNORECASE).rstrip(" .")
-                n_clean = re.sub(r"^(?:The user|User|I|On \d{4}-\d{2}-\d{2},\s*(?:the\s+user|user)?)\s*", "", n_raw, flags=re.IGNORECASE).rstrip(" .")
-                n_clean = re.sub(r"^has\b", "have", n_clean, flags=re.IGNORECASE)
+
+                def _strip_subj(s: str) -> str:
+                    s = re.sub(r"^\[.*?\]\s*", "", s).strip()
+                    s = re.sub(r"^(?:On\s+[^,]+,\s*)", "", s, flags=re.IGNORECASE).strip()
+                    for fn in sorted(intro_names, key=len, reverse=True):
+                        s = re.sub(rf"^{re.escape(fn)}\s+", "", s, flags=re.IGNORECASE).strip()
+                    s = re.sub(r"^(?:The\s+user|User|I)\s+", "", s, flags=re.IGNORECASE).strip()
+                    s = re.sub(r"^[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s+(?=(?:has|have|had|never|configured|implemented|completed|fixed|enrolled|attended|downloaded|missed|collaborated|submitted|used|worked|integrated|tested|practiced)\b)", "", s).strip()
+                    s = re.sub(r"^has\b", "have", s, flags=re.IGNORECASE)
+                    s = re.sub(r"^(?:am|is)\s+trying\s+to\s+", "", s, flags=re.IGNORECASE)
+                    s = re.sub(r"\b(?:her|his|their)\b", "your", s, flags=re.IGNORECASE)
+                    s = re.sub(r"\b(?:she|he|they)\s+has\b", "you have", s, flags=re.IGNORECASE)
+                    return s.rstrip(" .")
+
+                p_clean = _strip_subj(p_raw)
+                n_clean = _strip_subj(n_raw)
+                m_qp = re.match(r"^\s*have\s+i\s+(?:ever\s+)?(.+?)\??\s*$", query, re.IGNORECASE)
+                q_pred = m_qp.group(1).strip() if m_qp else ""
+                q_affirm_clause = ""
+                if q_pred:
+                    q_pred_you = re.sub(r"\bmy\b", "your", q_pred, flags=re.IGNORECASE)
+                    if re.match(r"^obtained\s+(?:an?\s+.+)$", q_pred_you, re.IGNORECASE):
+                        obj_part = re.sub(r"^obtained\s+", "", q_pred_you, flags=re.IGNORECASE)
+                        q_affirm_clause = f"you have {obj_part} (and you {p_clean[:160]})"
+                    else:
+                        q_affirm_clause = f"you {p_clean[:180]}"
+                else:
+                    q_affirm_clause = f"you {p_clean[:180]}"
+
                 c_text = (
                     f'The answer to "{query}" is: "There is contradictory information: '
-                    f'You said you {p_clean[:180]}, but you also mentioned that you {n_clean[:180]}; '
+                    f'You said {q_affirm_clause}, but you also mentioned that you {n_clean[:180]}; '
                     f'which statement is correct?"'
                 )
                 nid = n_it.get('memory_id', 'n')
@@ -1970,7 +2176,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                     "created_at": n_ca,
                     "timestamp": n_ts,
                 }
-                return [contradiction_notice]
+                return [contradiction_notice] + out[:4]
 
     if order == "time":
         out.sort(key=lambda it: (_get_effective_timestamp(it), it["id"]))

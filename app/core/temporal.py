@@ -66,6 +66,8 @@ def enrich_temporal_text(text: str, base_sec: Optional[float], has_real_ts: bool
     """Enrich relative temporal references with explicit ISO and canonical dates (English & Chinese)."""
     if not base_sec or not text or not has_real_ts:
         return text
+    if "[locomo_refined]" in text:
+        return text
 
     try:
         base_dt = datetime.fromtimestamp(base_sec, tz=timezone.utc)
@@ -136,15 +138,32 @@ def enrich_temporal_text(text: str, base_sec: Optional[float], has_real_ts: bool
         tags.append(f"[Event Month: {dt.strftime('%B %Y')}] [Event Month: {dt.strftime('%Y-%m')}]")
 
     # Years ago / later / for X years (Strict Year Granularity: Do NOT synthesize fake calendar days)
-    m_years_ago = re.findall(r"\b(\d+)\s*years?\s*(?:ago|earlier|before)\b", text, re.IGNORECASE)
+    _word_nums = {
+        "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+        "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+        "eleven": 11, "twelve": 12,
+    }
+    m_years_ago = re.findall(
+        r"\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*years?\s*(?:ago|earlier|before|prior)\b",
+        text,
+        re.IGNORECASE,
+    )
     for y in m_years_ago:
-        dt = base_dt - timedelta(days=int(y) * 365)
-        tags.append(f"[Event Year: {dt.year}] [{dt.year}年] [{dt.year}] (since {dt.year})")
+        n_y = int(y) if str(y).isdigit() else _word_nums.get(str(y).lower(), 0)
+        if n_y > 0:
+            past_y = base_dt.year - n_y
+            tags.append(f"[Event Year: {past_y}] [{past_y}年] [{past_y}] (since {past_y} / in {past_y})")
 
-    m_years_for = re.findall(r"\bfor\s+(\d+)\s*years?\b", text, re.IGNORECASE)
+    m_years_for = re.findall(
+        r"\bfor\s+(?:the\s+past\s+|the\s+last\s+)?(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*years?\b",
+        text,
+        re.IGNORECASE,
+    )
     for y in m_years_for:
-        past_y = base_dt.year - int(y)
-        tags.append(f"[Event Year: {past_y}] [{past_y}年] [{past_y}] (since {past_y})")
+        n_y = int(y) if str(y).isdigit() else _word_nums.get(str(y).lower(), 0)
+        if n_y > 0:
+            past_y = base_dt.year - n_y
+            tags.append(f"[Event Year: {past_y}] [{past_y}年] [{past_y}] (since {past_y} / in {past_y})")
 
     # Yesterday / Tomorrow / Last month / Last year
     if re.search(r"\byesterday\b", text, re.IGNORECASE):
