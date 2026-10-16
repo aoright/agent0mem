@@ -10,10 +10,10 @@ ssh -o StrictHostKeyChecking=no -i "${SSH_KEY}" "${REMOTE_HOST}" '
   TS=$(date +%Y%m%d_%H%M%S)
   SNAPSHOT_DB="/var/lib/agent0mem/backups/hot_snapshot_${TS}.sqlite3"
   sqlite3 /var/lib/agent0mem/data/memories.sqlite3 "
-    PRAGMA wal_checkpoint(PASSIVE);
+    PRAGMA busy_timeout = 5000;
     ATTACH DATABASE \"${SNAPSHOT_DB}\" AS snap;
     CREATE TABLE snap.schema_info AS SELECT sql FROM sqlite_master WHERE type=\"table\";
-    CREATE TABLE snap.memories_recent AS SELECT * FROM memories WHERE rowid > (SELECT max(rowid) - 2000 FROM memories);
+    CREATE TABLE snap.memories_recent AS SELECT * FROM memories WHERE id > (SELECT max(id) - 500 FROM memories);
     DETACH DATABASE snap;
   "
   ls -lh "${SNAPSHOT_DB}"

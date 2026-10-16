@@ -949,6 +949,8 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         re.IGNORECASE,
     ))
     if is_char_arc_q:
+        if order == "score":
+            order = "time"
         m_char = re.search(r"\b([A-Z][a-z]{2,})['’]s\b", q_stem)
         target_char = m_char.group(1).lower() if m_char else ""
         other_ents = [
@@ -981,6 +983,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                         fused[mid] *= 0.25
 
     is_user_init = len(q_stem) <= 600 and bool(_USER_INIT_PAT.search(q_stem))
+    user_init_primary_mids: set = set()
     if is_user_init:
         _INIT_META_STOP = _STOPWORDS | _NON_ENTITY_WORDS | {
             "order", "brought", "different", "aspects", "aspect", "implementing", "implement",
@@ -1015,7 +1018,8 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                     is_followup = ("->->" in nc_u or bool(re.search(r"\b(?:hmm|what\s+about|what\s+if|also|how\s+about)\b", nc_u, re.IGNORECASE)))
                     if after_mid in anchor_raw_mids or (step == 1 and is_followup):
                         bridged_raw_mids.add(next_mid)
-        for mid in list(fused) + list(anchor_raw_mids | bridged_raw_mids):
+        user_init_primary_mids = anchor_raw_mids | bridged_raw_mids
+        for mid in list(fused) + list(user_init_primary_mids):
             if mid not in by_id or mid in active_superseded_mids:
                 continue
             r = by_id[mid]
@@ -1859,6 +1863,8 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                             "yesterday",
                             body,
                         )
+                        if "yesterday" not in body.lower():
+                            body = body.rstrip(".") + " yesterday."
                         break
             else:
                 for nid in neighbours(mid):
@@ -2137,7 +2143,8 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                     for fn in sorted(intro_names, key=len, reverse=True):
                         s = re.sub(rf"^{re.escape(fn)}\s+", "", s, flags=re.IGNORECASE).strip()
                     s = re.sub(r"^(?:The\s+user|User|I)\s+", "", s, flags=re.IGNORECASE).strip()
-                    s = re.sub(r"^[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s+(?=(?:has|have|had|never|configured|implemented|completed|fixed|enrolled|attended|downloaded|missed|collaborated|submitted|used|worked|integrated|tested|practiced)\b)", "", s).strip()
+                    s = re.sub(r"^[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s+(?=(?:hasn['’]?t|haven['’]?t|hadn['’]?t|has|have|had|never|configured|implemented|completed|fixed|enrolled|attended|downloaded|missed|collaborated|submitted|used|worked|integrated|tested|practiced|obtained)\b)", "", s).strip()
+                    s = re.sub(r"^hasn['’]?t\b", "haven't", s, flags=re.IGNORECASE)
                     s = re.sub(r"^has\b", "have", s, flags=re.IGNORECASE)
                     s = re.sub(r"^(?:am|is)\s+trying\s+to\s+", "", s, flags=re.IGNORECASE)
                     s = re.sub(r"\b(?:her|his|their)\b", "your", s, flags=re.IGNORECASE)
@@ -2178,8 +2185,13 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 }
                 return [contradiction_notice] + out[:4]
 
-    if order == "time":
-        out.sort(key=lambda it: (_get_effective_timestamp(it), it["id"]))
+    if order == "time" and not is_ref_doc_session:
+        if is_char_arc_q:
+            out.sort(key=lambda it: (0 if str(it["id"]).startswith("raw_") else 1, _get_effective_timestamp(it), it["id"]))
+        elif is_user_init and user_init_primary_mids:
+            out.sort(key=lambda it: (0 if it["id"] in user_init_primary_mids else 1, _get_effective_timestamp(it), it["id"]))
+        else:
+            out.sort(key=lambda it: (_get_effective_timestamp(it), it["id"]))
     if premise_notices:
         out = premise_notices + [it for it in out if not it["id"].startswith("premise_")]
     if contradiction_notice:
