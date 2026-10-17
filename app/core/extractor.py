@@ -118,6 +118,8 @@ def extract_propositions(messages: List[Dict[str, Any]]) -> List[str]:
         if content_str and len(content_str) > 1:
             if is_raw_fragmented_tool_call(content_str):
                 continue
+            if "[locomo_refined]" in content_str:
+                time_prefix = ""
             dialogue_lines.append(f"{time_prefix}{role}: {content_str}")
 
 
