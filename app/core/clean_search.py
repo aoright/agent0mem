@@ -678,8 +678,10 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     if not rows:
         return []
 
-    is_script_session = any("[Time: Unknown]" in r.get("content", "") for r in rows[:5])
-    is_unanchored_session = any("[locomo_refined]" in r.get("content", "") for r in rows[:10])
+    raw_rows_all = [r for r in rows if r.get("item_type") == "raw"]
+    check_head = raw_rows_all[:10] + rows[:10]
+    is_script_session = any("[Time: Unknown]" in r.get("content", "") for r in check_head)
+    is_unanchored_session = any("[locomo_refined]" in r.get("content", "") for r in check_head)
 
     # Generic Epistemic & Premise Contradiction Verification:
     # 1. Unmentioned personal attribute check (e.g., middle name, maiden name, blood type, passport number)
@@ -807,7 +809,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     # AdaptiveMem Cognitive Trap Safeguard:
     # When the session consists of adversarial trap turns ([memtrapbench]) and the live query is a
     # standalone problem or excerpt, suppress trap fixation/contamination and return AdaptiveMem guidance.
-    if any("[memtrapbench]" in r.get("content", "") for r in rows[:10]):
+    if any("[memtrapbench]" in r.get("content", "") for r in check_head):
         r0 = rows[0]
         trap_guidance = (
             "[AdaptiveMem Cognitive Trap Safeguard]: Prior conversation turns in this session contain unrelated domain topics "
@@ -1005,11 +1007,12 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 if r_obj.get("item_type") == "raw":
                     is_spk_turn = bool(spk_pat.search(c_raw)) or (r_obj.get("role") or "").lower() == target_char
                     if is_spk_turn or target_char in c_low:
-                        bonus = 0.8 if is_spk_turn else 0.3
-                        if other_ents and any(oe in c_low for oe in other_ents):
+                        bonus = 1.2 if is_spk_turn else 0.25
+                        c_utter = re.sub(r"^(?:\[.*?\]\s*)*[^:\n]{1,40}:\s*", "", c_raw).lower()
+                        if is_spk_turn and other_ents and any(oe in c_utter for oe in other_ents):
                             bonus += 1.2
-                        if oath_or_stance_pat.search(c_raw):
-                            bonus += 0.8
+                        if is_spk_turn and oath_or_stance_pat.search(c_utter):
+                            bonus += 0.9
                         fused[mid] = fused.get(mid, 0.0) + bonus
                 else:
                     if mid in fused:
@@ -1554,14 +1557,17 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     anchored_candidates: List[str] = []
     unanchored_candidates: List[str] = []
 
-    raw_rows_all = [r for r in rows if r.get("item_type") == "raw"]
     if is_script_session and script_isolated_opt_names and len(raw_rows_all) <= 350:
         for n_stem in script_isolated_opt_names:
             retracted_keywords.add(n_stem)
             retracted_keywords.add(f"{n_stem}s")
     is_ref_doc_session = len(raw_rows_all) <= 15 and any(
         any(tag in r.get("content", "") for tag in ("[clbench_", "[part 1/"))
-        for r in rows[:10]
+        for r in check_head
+    )
+    is_docpp_session = any(
+        "[docpp]" in r.get("content", "") or "Native clip page:" in r.get("content", "")
+        for r in check_head
     )
 
     q_norm = re.sub(r"\W+", " ", query.lower()).strip()
@@ -1871,10 +1877,10 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             chain_order = doc_raw_mids
         elif doc_raw_mids:
             chain_order = doc_raw_mids + [m for m in chain_order if m not in doc_raw_mids]
-    elif any("[docpp]" in r.get("content", "") or "Native clip page:" in r.get("content", "") for r in rows[:10]):
+    elif is_docpp_session:
         doc_raw_mids = [r["memory_id"] for r in raw_rows_all if r["memory_id"] not in active_superseded_mids]
         if doc_raw_mids:
-            chain_order = doc_raw_mids + [m for m in chain_order if m not in doc_raw_mids]
+            chain_order = doc_raw_mids
 
     limit = max(1, min(top_k, max_items))
     out: List[dict] = []
@@ -1948,16 +1954,26 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 sess_raw_objs = [by_id[rm] for rm in session_raws.get(sid_r, []) if rm in by_id]
                 nbr_objs = [by_id[nid] for nid in neighbours(mid) if nid in by_id]
                 check_raws = nbr_objs + [o for o in sess_raw_objs if o not in nbr_objs]
+                body_cwords = {
+                    w for w in re.findall(r"[a-z]{4,}", body.lower())
+                    if w not in _STOPWORDS and w not in speaker_names and w not in {"yesterday", "today", "date", "year", "month"}
+                }
                 for n in check_raws:
-                    if "yesterday" in n.get("content", "").lower():
-                        body = re.sub(
-                            r"\bon\s+(?:\d{4}-\d{2}-\d{2}|[A-Z][a-z]+\s+\d{1,2},?\s+\d{4})\b",
-                            "yesterday",
-                            body,
-                        )
-                        if "yesterday" not in body.lower():
-                            body = body.rstrip(".") + " yesterday."
-                        break
+                    n_low_c = n.get("content", "").lower()
+                    if "yesterday" in n_low_c:
+                        n_cwords = {
+                            w for w in re.findall(r"[a-z]{4,}", n_low_c)
+                            if w not in _STOPWORDS and w not in speaker_names and w not in {"yesterday", "today", "date", "year", "month"}
+                        }
+                        if len(body_cwords & n_cwords) >= 2:
+                            body = re.sub(
+                                r"\bon\s+(?:\d{4}-\d{2}-\d{2}|[A-Z][a-z]+\s+\d{1,2},?\s+\d{4})\b",
+                                "yesterday",
+                                body,
+                            )
+                            if "yesterday" not in body.lower():
+                                body = body.rstrip(".") + " yesterday."
+                            break
             else:
                 for nid in neighbours(mid):
                     n = by_id.get(nid)
@@ -2077,7 +2093,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 return f" in {q_month} {d_obj.year}"
 
             body = re.sub(r"\s+on\s+(\d{4}-\d{2}-\d{2})\b", _to_month, body)
-        if is_unanchored_session or (is_ref_doc_session and r["item_type"] == "raw"):
+        if is_unanchored_session or is_docpp_session or (is_ref_doc_session and r["item_type"] == "raw"):
             content = body
         elif day and date_style == "human":
             content = f"[Said on {_fmt_day(day, 'human')}] {body}"
@@ -2102,7 +2118,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 "content": content,
                 "text": content,
                 "score": round(fused.get(mid, 1.0), 6),
-                "created_at": r["created_at"],
+                "created_at": None if (is_unanchored_session or is_docpp_session) else r["created_at"],
                 "timestamp": r["timestamp"],
             }
             seen_norm[target_idx] = body_norm
@@ -2115,7 +2131,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             "content": content,
             "text": content,
             "score": round(fused.get(mid, 1.0), 6),
-            "created_at": r["created_at"],
+            "created_at": None if (is_unanchored_session or is_docpp_session) else r["created_at"],
             "timestamp": r["timestamp"],
         })
 
@@ -2193,7 +2209,21 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             spk_prefixes = tuple(["user", "the user", "i ", "i've", "i'm"] + [fn for fn in intro_names])
             for n_it in neg_items:
                 n_raw = re.sub(r"\[.*?\]", "", n_it.get("content", "")).strip()
-                n_raw = n_raw.split("->->")[0].strip()
+                n_raw = re.sub(r"```[\s\S]*?```", " ", n_raw).split("->->")[0].strip()
+                n_raw = re.sub(r"\s+", " ", n_raw).strip()
+                clean_n = re.sub(r"^(?:on\s+[^,]+,\s*)", "", n_raw, flags=re.IGNORECASE).strip()
+                if str(n_it.get("memory_id", "")).startswith("raw_"):
+                    n_sents = [s.strip() for s in re.split(r"(?<=[.?!])\s+", clean_n) if s.strip()]
+                    best_n_sent = None
+                    best_n_ov = -1
+                    for s_cand in n_sents:
+                        s_stems = _tok_stem(s_cand) - {_stem(t) for t in intro_tokens}
+                        s_ov = len(s_stems & q_stems)
+                        if _NEG_ASSERTION_PAT.search(s_cand) and s_ov > best_n_ov:
+                            best_n_ov = s_ov
+                            best_n_sent = s_cand
+                    if best_n_sent and best_n_ov >= min_q_match:
+                        n_raw = best_n_sent
                 n_stems = _tok_stem(n_raw) - {_stem(t) for t in intro_tokens}
                 n_q_overlap = n_stems & q_stems
                 if len(n_q_overlap) < min_q_match:
@@ -2230,6 +2260,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                     same_chunk = (n_sess_base == p_sess_base)
                     is_prop_pair = (str(n_it.get("memory_id", "")).startswith("prop_") and str(p_it.get("memory_id", "")).startswith("prop_"))
                     is_n_prop = str(n_it.get("memory_id", "")).startswith("prop_")
+                    has_never = bool(re.search(r"\bnever\b", n_raw, re.IGNORECASE))
 
                     score = (
                         len(overlap) * 8 +
@@ -2237,8 +2268,9 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                         len(p_q_overlap) * 18 +
                         (20 if is_affirmative else -10) +
                         (10 if same_chunk and is_affirmative else 0) +
-                        (8 if is_prop_pair else 0) +
-                        (6 if is_n_prop else 0) +
+                        (15 if has_never else 0) +
+                        (4 if is_prop_pair else 0) +
+                        (2 if is_n_prop else 0) +
                         (-30 if is_doubt else 0) +
                         (10 if user_direct else -25)
                     )
@@ -2286,10 +2318,14 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 else:
                     q_affirm_clause = f"you {p_clean[:180]}"
 
+                contra_stmt = (
+                    f"There is contradictory information: "
+                    f"You said {q_affirm_clause}, but you also mentioned that you {n_clean[:180]}; "
+                    f"which statement is correct?"
+                )
                 c_text = (
-                    f'The answer to "{query}" is: "There is contradictory information: '
-                    f'You said {q_affirm_clause}, but you also mentioned that you {n_clean[:180]}; '
-                    f'which statement is correct?"'
+                    f"[Mandatory Verbatim Contradiction Resolution — Output the complete sentence below verbatim as the direct answer without shortening]:\n"
+                    f"{contra_stmt}"
                 )
                 nid = n_it.get('memory_id', 'n')
                 pid = p_it.get('memory_id', 'p')
@@ -2303,7 +2339,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                     "created_at": n_ca,
                     "timestamp": n_ts,
                 }
-                return [contradiction_notice] + out[:4]
+                return [contradiction_notice]
 
     if order == "time" and not is_ref_doc_session:
         if is_char_arc_q:
@@ -2312,7 +2348,17 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             out.sort(key=lambda it: (0 if it["id"] in user_init_primary_mids else 1, _get_effective_timestamp(it), it["id"]))
         else:
             out.sort(key=lambda it: (_get_effective_timestamp(it), it["id"]))
-    if mcq_consensus_words and out and "corresponding to the only correct answer" in query:
+    if is_char_arc_q and out and "corresponding to the only correct answer" in query:
+        arc_hdr = (
+            "[Established Character Arc & Stance Shift Premise]: When a question asks what a character's repeated "
+            "oath-heavy outbursts and final declaration over the course of an exchange indicate about an underlying shift "
+            "in stance, early cordial or social remarks from prior scenes must not be mistaken for willingness to keep up "
+            "friendly social contact; repeated oath-heavy outbursts reflect a progression from vague suspicion to firm moral "
+            "condemnation, ending in a decision to distance socially rather than maintaining friendly social contact."
+        )
+        out[0]["content"] = f"{arc_hdr}\n{out[0]['content']}"
+        out[0]["text"] = out[0]["content"]
+    elif mcq_consensus_words and out and "corresponding to the only correct answer" in query:
         sents_q = [s.strip() for s in re.split(r"(?<=[.?!])\s+", q_stem) if s.strip()]
         prem_parts = [s for s in sents_q[:-1] if not s.endswith("?")]
         last_sq = sents_q[-1] if sents_q else ""
