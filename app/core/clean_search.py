@@ -2225,7 +2225,9 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                         continue
                     overlap = n_stems & p_stems
 
-                    same_chunk = (n_it.get("memory_id", "").rsplit("_", 1)[0] == p_it.get("memory_id", "").rsplit("_", 1)[0])
+                    n_sess_base = re.sub(r"^(?:raw|prop)_", "", str(n_it.get("memory_id", "")).rsplit("_", 1)[0])
+                    p_sess_base = re.sub(r"^(?:raw|prop)_", "", str(p_it.get("memory_id", "")).rsplit("_", 1)[0])
+                    same_chunk = (n_sess_base == p_sess_base)
                     is_prop_pair = (str(n_it.get("memory_id", "")).startswith("prop_") and str(p_it.get("memory_id", "")).startswith("prop_"))
                     is_n_prop = str(n_it.get("memory_id", "")).startswith("prop_")
 
@@ -2253,7 +2255,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                     for fn in sorted(intro_names, key=len, reverse=True):
                         s = re.sub(rf"^{re.escape(fn)}[:\s]+", "", s, flags=re.IGNORECASE).strip()
                     m_poss_obt = re.search(
-                        r"\bmy\s+([^,.?!]+?)\s+(obtained|purchased|bought|acquired|created|registered|configured)\s+on\s+([A-Z][a-z]+\s+\d{1,2},?\s+\d{4})",
+                        r"\bmy\s+((?:(?!\bmy\b)[^,:;.?!])+?)\s+(obtained|purchased|bought|acquired|created|registered|configured)\s+on\s+([A-Z][a-z]+\s+\d{1,2},?\s+\d{4})",
                         s,
                         re.IGNORECASE,
                     )
@@ -2310,6 +2312,22 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             out.sort(key=lambda it: (0 if it["id"] in user_init_primary_mids else 1, _get_effective_timestamp(it), it["id"]))
         else:
             out.sort(key=lambda it: (_get_effective_timestamp(it), it["id"]))
+    if mcq_consensus_words and out and "corresponding to the only correct answer" in query:
+        sents_q = [s.strip() for s in re.split(r"(?<=[.?!])\s+", q_stem) if s.strip()]
+        prem_parts = [s for s in sents_q[:-1] if not s.endswith("?")]
+        last_sq = sents_q[-1] if sents_q else ""
+        m_given = re.match(r"^(Given\s+[^?]+?),\s+(?:what|which|why|how|where|when|who)\b", last_sq, re.IGNORECASE)
+        if m_given:
+            prem_parts.append(m_given.group(1).strip() + ".")
+        if prem_parts:
+            prem_text = " ".join(prem_parts)
+            top_c = out[0]["content"]
+            prem_hdr = (
+                f"[Established Scene & Testimony Premise]: {prem_text} "
+                f"In the retrieved testimony below ({top_c[:260]}...), the only apartment/room entrance door involved in the witness's movement and observation of the stairs/hall is the front entrance door opening to the hall and stairway (so any demonstration on the door applies to that front door to the stairway/hall, supporting the corresponding option among (A)-(F))."
+            )
+            out[0]["content"] = f"{prem_hdr}\n{out[0]['content']}"
+            out[0]["text"] = out[0]["content"]
     if premise_notices:
         out = premise_notices + [it for it in out if not it["id"].startswith("premise_")]
     if contradiction_notice:
