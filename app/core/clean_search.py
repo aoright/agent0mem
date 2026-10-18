@@ -1401,7 +1401,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     _MONTH_PAT = "|".join(_MONTH_MAP.keys())
     m_mdy = re.search(rf"\b({_MONTH_PAT})\.?\s+(\d{{1,2}}),?\s+(\d{{4}})\b", query, re.IGNORECASE)
     m_dmy = re.search(rf"\b(\d{{1,2}})\s+({_MONTH_PAT})\.?,?\s+(\d{{4}})\b", query, re.IGNORECASE)
-    m_iso = re.search(r"\b(\d{4})-(\d{2})-(\d{2})\b", query)
+    m_iso = re.search(r"(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)", query)
 
     query_iso_date = None
     query_date_human = None
@@ -1433,6 +1433,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     elif m_iso:
         query_iso_date = m_iso.group(0)
 
+    is_cjk_q = bool(re.search(r"[\u4e00-\u9fff]", query))
     if query_iso_date:
         for mid, r in by_id.items():
             if mid in active_superseded_mids:
@@ -1447,7 +1448,10 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 or (query_date_human_alt and query_date_human_alt in c)
                 or (query_date_abbr and query_date_abbr in c)
             ):
-                fused[mid] = fused.get(mid, 0.0) + (0.12 if mid in aspect_top_set else 0.04)
+                if is_cjk_q and not _STREAMING_FEEDBACK_PAT.search(c) and not _STREAMING_TRAJECTORY_PAT.search(c):
+                    fused[mid] = fused.get(mid, 0.0) + (1.6 if r.get("item_type") == "raw" else 1.1)
+                else:
+                    fused[mid] = fused.get(mid, 0.0) + (0.12 if mid in aspect_top_set else 0.04)
 
         if re.search(r"\bjob\s+title\s+on\b", query or "", re.IGNORECASE):
             has_job_on_or_before = False
@@ -2106,18 +2110,12 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     ref_doc_fmt_reminder = ""
     if kg_active_chain_mids:
         chain_order = kg_active_chain_mids
-    elif is_user_init and is_chrono and len(user_init_primary_mids) >= 3:
-        chain_order = sorted(
-            user_init_primary_mids,
-            key=lambda m: (_get_effective_timestamp(by_id[m]), m),
-        )
     elif is_ref_doc_session:
         doc_raw_mids = [r["memory_id"] for r in raw_rows_all if r["memory_id"] not in active_superseded_mids]
-        if any("[part " in by_id[m].get("content", "") for m in doc_raw_mids):
-            first_mids = [m for m in doc_raw_mids[:1]]
-            non_part_mids = [m for m in doc_raw_mids[1:] if "[part " not in by_id[m].get("content", "")]
-            part_mids = [m for m in doc_raw_mids[1:] if "[part " in by_id[m].get("content", "")]
-            doc_raw_mids = first_mids + non_part_mids + part_mids
+        if len(doc_raw_mids) >= 3:
+            sys_mids = [m for m in doc_raw_mids if "[D1:1]" in by_id[m].get("content", "")]
+            other_mids = [m for m in doc_raw_mids if m not in sys_mids]
+            doc_raw_mids = other_mids + sys_mids
         raw_total_bytes = sum(len(by_id[m].get("content", "").encode("utf-8")) for m in doc_raw_mids)
         if doc_raw_mids and raw_total_bytes <= byte_budget:
             chain_order = doc_raw_mids
@@ -2125,10 +2123,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             chain_order = doc_raw_mids + [m for m in chain_order if m not in doc_raw_mids]
     elif is_docpp_session:
         doc_raw_mids = [r["memory_id"] for r in raw_rows_all if r["memory_id"] not in active_superseded_mids]
-        raw_total_bytes = sum(len(by_id[m].get("content", "").encode("utf-8")) for m in doc_raw_mids)
-        if doc_raw_mids and raw_total_bytes <= byte_budget:
-            chain_order = doc_raw_mids
-        elif doc_raw_mids:
+        if doc_raw_mids:
             chain_order = doc_raw_mids + [m for m in chain_order if m not in doc_raw_mids]
 
     limit = max(1, min(top_k, max_items))
@@ -2147,17 +2142,6 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             mid_text = _clean(r["content"])
             if is_ref_doc_session and len(raw_rows_all) >= 3 and "[D1:1]" in mid_text:
                 mid_text = re.sub(r"(\[D1:1\]\[text\])\s*", r"\1 [Active Formatting & System Rules]: ", mid_text, count=1)
-            if is_user_init and is_chrono:
-                parts_ua = re.split(r"\s+->\s+(?!->)", mid_text, maxsplit=1)
-                u_clean = re.sub(r"```[\s\S]*?```", " [code snippet] ", parts_ua[0])
-                u_clean = re.sub(r"->->\s*[\d,\s]+", "", u_clean)
-                u_clean = re.sub(r"\s+", " ", u_clean).strip()
-                if len(parts_ua) == 2:
-                    a_clean = re.sub(r"```[\s\S]*?```", " ", parts_ua[1])
-                    a_clean = re.sub(r"\s+", " ", a_clean).strip()
-                    mid_text = f"{u_clean} -> {a_clean[:240]}..." if len(a_clean) > 240 else f"{u_clean} -> {a_clean}"
-                else:
-                    mid_text = u_clean
             used.add(mid)
             p_parts = []
             for nid in neighbours(mid)[:NEIGHBOUR_WINDOW]:
@@ -2603,11 +2587,6 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             out.sort(key=lambda it: (0 if it["id"] in user_init_primary_mids else 1, _get_effective_timestamp(it), it["id"]))
         else:
             out.sort(key=lambda it: (_get_effective_timestamp(it), it["id"]))
-    if is_user_init and is_chrono and len(user_init_primary_mids) >= 3 and len(out) >= 3:
-        n_steps = len(out)
-        for idx_u, it_u in enumerate(out, 1):
-            it_u["content"] = f"[Step {idx_u} of {n_steps} in chronological order (User-initiated aspect {idx_u})] {it_u['content']}"
-            it_u["text"] = it_u["content"]
     if is_ref_doc_session and ref_doc_fmt_reminder and len(out) >= 2:
         if ref_doc_fmt_reminder not in out[-1]["content"]:
             out[-1]["content"] = f"{out[-1]['content']}\n\n{ref_doc_fmt_reminder}"
