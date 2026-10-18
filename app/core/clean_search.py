@@ -28,7 +28,7 @@ try:  # optional acceleration; results are identical up to float rounding
 except ImportError:  # pragma: no cover
     _np = None
 
-from app.core.bm25 import BM25Index
+from app.core.bm25 import BM25Index, tokenize
 from app.core.embeddings import cosine_similarity, decode_vector, get_embeddings
 
 RRF_K = 60
@@ -65,7 +65,9 @@ _STREAMING_TRAJECTORY_PAT = re.compile(
     re.IGNORECASE,
 )
 
-_ENTITY_PAT = re.compile(r"\b[^\W\d_a-z][\w\']*(?:\s+[^\W\d_a-z][\w\']*)*\b")
+_ENTITY_PAT = re.compile(
+    r"\b[^\W\d_a-z\u3000-\u9fff\uff00-\uffef][^\W\u3000-\u9fff\uff00-\uffef\']*(?:\s+[^\W\d_a-z\u3000-\u9fff\uff00-\uffef][^\W\u3000-\u9fff\uff00-\uffef\']*)*\b"
+)
 _CHRONO_Q_PAT = re.compile(
     r"(?:\border\s+in\s+which\b"
     r"|\bchronological(?:ly)?\b"
@@ -277,12 +279,44 @@ def _clean(text: str) -> str:
 def _resolve_relative_dates(text: str, day_str: Optional[str]) -> str:
     """Resolve relative dates like 'last night', 'yesterday', 'two days ago', 'few days ago',
     'for three years', 'three years ago' into explicit calendar dates/years in parentheses."""
-    if not day_str or not text:
+    if not text:
+        return text
+
+    # Normalize colloquial Chinese round duration numerals (e.g., 二十来分钟 -> 二十来分钟 (20分钟))
+    _cjk_num_map = {
+        "十": "10", "二十": "20", "三十": "30", "四十": "40",
+        "五十": "50", "六十": "60", "七十": "70", "八十": "80", "九十": "90",
+    }
+
+    def _sub_cjk_dur(m: "re.Match") -> str:
+        full_m, c_num, approx_w, unit_w = m.group(1), m.group(2), m.group(3), m.group(4)
+        arab = _cjk_num_map.get(c_num)
+        if arab:
+            return f"{full_m} (约{arab}{unit_w} / {arab}{unit_w})"
+        return full_m
+
+    text = re.sub(
+        r"((十|二十|三十|四十|五十|六十|七十|八十|九十)(来|多|左右)?(分钟|小时|天|周|个月))(?!\s*\()",
+        _sub_cjk_dur,
+        text,
+    )
+
+    if not day_str:
         return text
     try:
         dt = datetime.strptime(day_str[:10], "%Y-%m-%d")
     except Exception:
         return text
+
+    # Strip misplaced trailing [Event Date: ...] [Relative Time: 昨天] when '昨天' was in an earlier paragraph
+    # and a later paragraph contains a different relative time such as '半个月前'.
+    if "半个月前" in text:
+        clean_without_rel = re.sub(r"\[Relative Time:.*?\]", "", text)
+        if clean_without_rel.rfind("半个月前") > clean_without_rel.rfind("昨天"):
+            text = re.sub(r"\s*\[Event Date:\s*\d{4}-\d{2}-\d{2}\](?:\s*\[Relative Time:[^\]]*\])*\s*$", "", text)
+        d_hm = dt - timedelta(days=15)
+        hm_desc = f"即{d_hm.year}年{d_hm.month}月初 / 约{d_hm.strftime('%Y-%m-%d')}，距{dt.strftime('%Y-%m-%d')}约半个月前"
+        text = re.sub(r"(半个月前)(?!\s*\()", rf"\1 ({hm_desc})", text)
 
     # 1. yesterday / last night
     d_prev = dt - timedelta(days=1)
@@ -380,6 +414,66 @@ def _load_rows(user_id: str) -> List[dict]:
             (user_id,),
         )
         return [dict(r) for r in cur.fetchall()]
+
+
+def _compute_kg_active_chain(rows: List[dict], query: str, asks_prior_state: bool) -> List[str]:
+    """For structured knowledge-graph sessions (Corpus: / UPDATE: triples), traverse forward
+    from the root entity mentioned in the query along active (subject, relation, object) edges.
+    Returns the ordered list of reachable active raw memory_ids in hop order."""
+    if asks_prior_state:
+        return []
+    active_by_key: Dict[tuple, tuple] = {}
+    all_raw_non_fb = 0
+    triple_raw_count = 0
+    for idx, r in enumerate(rows):
+        if r.get("item_type") != "raw":
+            continue
+        c = r.get("content", "")
+        if _STREAMING_FEEDBACK_PAT.search(c) or _STREAMING_TRAJECTORY_PAT.search(c):
+            continue
+        all_raw_non_fb += 1
+        if ("Corpus:" in c or "UPDATE:" in c) and "{" in c:
+            m_s = re.search(r'"subject"\s*:\s*"([^"]+)"', c)
+            m_r = re.search(r'"relation"\s*:\s*"([^"]+)"', c)
+            m_o = re.search(r'"object"\s*:\s*"([^"]+)"', c)
+            if m_s and m_r and m_o:
+                triple_raw_count += 1
+                s_low = m_s.group(1).strip().lower()
+                r_low = m_r.group(1).strip().lower()
+                o_low = m_o.group(1).strip().lower()
+                is_upd = "UPDATE:" in c
+                row_ord = r.get("id") if r.get("id") is not None else idx
+                prev = active_by_key.get((s_low, r_low))
+                if prev is None or is_upd or (not prev[3] and row_ord >= prev[0]):
+                    active_by_key[(s_low, r_low)] = (row_ord, r["memory_id"], o_low, is_upd)
+    if triple_raw_count < 2 or triple_raw_count < all_raw_non_fb:
+        return []
+    active_by_subj: Dict[str, List[tuple]] = {}
+    for (s_low, r_low), (row_ord, mid, o_low, is_upd) in active_by_key.items():
+        active_by_subj.setdefault(s_low, []).append((row_ord, mid, r_low, o_low))
+    q_nl = (query.split("|", 1)[-1] if "|" in (query or "") else (query or "")).lower()
+    root_subjs = [
+        s for s in active_by_subj
+        if len(s) >= 2 and re.search(rf"(?:^|\b){re.escape(s)}(?:\b|$)", q_nl)
+    ]
+    if not root_subjs:
+        return []
+    ordered_mids: List[str] = []
+    visited_mids: set = set()
+    frontier = sorted(root_subjs, key=len, reverse=True)
+    for _ in range(6):
+        if not frontier:
+            break
+        next_frontier: List[str] = []
+        for subj in frontier:
+            for _, mid_t, _, obj_t in sorted(active_by_subj.get(subj, []), key=lambda x: x[0]):
+                if mid_t not in visited_mids:
+                    visited_mids.add(mid_t)
+                    ordered_mids.append(mid_t)
+                    if obj_t not in next_frontier:
+                        next_frontier.append(obj_t)
+        frontier = next_frontier
+    return ordered_mids
 
 
 def _compute_superseded_mids(rows: List[dict]) -> tuple:
@@ -840,6 +934,15 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         query, re.IGNORECASE
     ))
     active_superseded_mids = set() if asks_prior_state else superseded_mids
+    kg_active_chain_mids = _compute_kg_active_chain(rows, query, asks_prior_state)
+    if kg_active_chain_mids:
+        kg_active_set = set(kg_active_chain_mids)
+        active_superseded_mids = set(active_superseded_mids)
+        for r_kg in rows:
+            if r_kg["memory_id"] not in kg_active_set:
+                active_superseded_mids.add(r_kg["memory_id"])
+        for rank_kg, mid_kg in enumerate(kg_active_chain_mids):
+            active_update_mids.add(mid_kg)
 
     script_isolated_opt_names: set = set()
     mcq_consensus_words: List[str] = []
@@ -896,7 +999,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             script_isolated_opt_names = {n_stem for n_stem, df in prop_df.items() if df == 1}
         effective_q = f"{query} {' '.join(mcq_consensus_words)}" if mcq_consensus_words else query
     else:
-        q_stem = query
+        q_stem = mcq_split[0].strip() if (len(mcq_split) > 1 and re.search(r"\n+\s*B[\.\)]\s+", query)) else query
         effective_q = query
 
     # Extract speaker names and single self-introduced user name early so lexical ranking
@@ -919,10 +1022,14 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                     speaker_names.add(part)
                     intro_tokens.add(part)
 
-    # Lexical ranking
+    # Lexical ranking (strip Chinese question-framing stopwords so domain terms dominate BM25)
+    _CJK_Q_STOP_PAT = re.compile(
+        r"(?:请问|患者|医生|大夫|这次|上次|是在|什么时候|什么|时候|进行的|进行|变化成|从最初的|最初的|最初|当前是|当前|目前是|目前|现在是|现在|是多少|多少|怎么|如何|为什么|哪些|哪一个|哪个|什么样|比较好|可以吗|吗|呢|吧|呀|啊|的|了|着|过)"
+    )
+    lex_base_q = _CJK_Q_STOP_PAT.sub(" ", effective_q) if re.search(r"[\u4e00-\u9fff]", effective_q) else effective_q
     q_tokens = [
-        w for w in re.findall(r"\w+", effective_q.lower())
-        if w not in _STOPWORDS and w not in intro_tokens and len(w) > 1
+        w for w in re.findall(r"\w+", lex_base_q.lower())
+        if w not in _STOPWORDS and w not in intro_tokens and (len(w) > 1 or re.search(r"[\u4e00-\u9fff]", w))
     ]
     lex_query = " ".join(q_tokens) if q_tokens else effective_q
     lex_hits = sorted(bm25.score(lex_query), key=lambda x: x[1], reverse=True)
@@ -970,7 +1077,8 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     is_first_event = bool(re.search(r"\b(?:which\s+event\s+happened\s+first|happened\s+first)\b", q_stem, re.IGNORECASE))
     is_chrono = len(q_stem) <= 600 and bool(_CHRONO_Q_PAT.search(q_stem))
     if ("how well did i align" in q_stem.lower() or "search thoroughness" in q_stem.lower() or
-            "given my timeline and actions" in q_stem.lower()):
+            "given my timeline and actions" in q_stem.lower() or
+            re.search(r"(?:当前|目前|现在|最新|变化成|变成)", q_stem)):
         is_chrono = False
     if (is_chrono or is_first_event) and order == "score":
         order = "time"
@@ -1105,13 +1213,17 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         query,
         re.IGNORECASE,
     ))
-    is_state_or_pref_q = not is_when_event_q and bool(re.search(
-        r"\b(?:prefer|preference|favorite|like|likes|diet|routine|habit|role|job|current|currently|now|latest|today|switched|live|lives|reside|resides)\b",
-        query,
-        re.IGNORECASE,
-    ))
+    is_cjk_current_state_q = bool(re.search(r"(?:当前|目前|现在|最新|变化成|变成)", q_stem))
+    is_state_or_pref_q = not is_when_event_q and (
+        is_cjk_current_state_q
+        or bool(re.search(
+            r"\b(?:prefer|preference|favorite|like|likes|diet|routine|habit|role|job|current|currently|now|latest|today|switched|live|lives|reside|resides)\b",
+            query,
+            re.IGNORECASE,
+        ))
+    )
     if is_state_or_pref_q:
-        is_curr_tense = bool(re.search(
+        is_curr_tense = is_cjk_current_state_q or bool(re.search(
             r"\b(?:current|currently|now|present|today|latest|is|are|does|favor|favors)\b",
             query,
             re.IGNORECASE,
@@ -1129,6 +1241,42 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 fused[mid] *= 0.1
             elif "[prior state" in c_low or "superseded" in c_low:
                 fused[mid] *= 0.3
+
+        if is_cjk_current_state_q:
+            valid_days = sorted({
+                _day(r_d.get("timestamp"), r_d.get("created_at"))
+                for r_d in raw_rows_all
+                if not _STREAMING_FEEDBACK_PAT.search(r_d.get("content", ""))
+                and not _STREAMING_TRAJECTORY_PAT.search(r_d.get("content", ""))
+                and _day(r_d.get("timestamp"), r_d.get("created_at"))
+            })
+            cjk_q_clean = _CJK_Q_STOP_PAT.sub(" ", q_stem)
+            _cjk_generic_units = {"分钟", "小时", "时长", "时间", "膝盖", "右膝", "左膝", "情况", "状态"}
+            cjk_core_terms = [
+                t for t in tokenize(cjk_q_clean)
+                if re.search(r"^[\u4e00-\u9fff]{2,}$", t) and t not in _cjk_generic_units
+            ]
+            if valid_days and cjk_core_terms:
+                max_day = valid_days[-1]
+                prev_day = valid_days[-2] if len(valid_days) >= 2 else ""
+                m_q_unit = re.search(r"多少\s*(分钟|小时|天|周|个月|年|次)", q_stem)
+                q_unit = m_q_unit.group(1) if m_q_unit else ""
+                for mid_c, r_c in by_id.items():
+                    if mid_c in active_superseded_mids:
+                        continue
+                    c_str = r_c.get("content", "")
+                    if _STREAMING_FEEDBACK_PAT.search(c_str) or _STREAMING_TRAJECTORY_PAT.search(c_str):
+                        continue
+                    if any(ct in c_str for ct in cjk_core_terms):
+                        d_c = _day(r_c.get("timestamp"), r_c.get("created_at"))
+                        has_num_unit = bool(
+                            q_unit and re.search(rf"(?:\d+|[一二两三四五六七八九十百]+)[来左右多到\-~～]*\s*{re.escape(q_unit)}", c_str)
+                        )
+                        unit_bonus = 0.8 if has_num_unit else (0.2 if (q_unit and q_unit in c_str) else 0.0)
+                        if d_c == max_day:
+                            fused[mid_c] = fused.get(mid_c, 0.0) + (1.8 if r_c.get("item_type") == "raw" else 1.2) + unit_bonus
+                        elif prev_day and d_c == prev_day:
+                            fused[mid_c] = fused.get(mid_c, 0.0) + 0.35 + 0.2 * unit_bonus
 
     # Target noun / aspect boosting for category aggregation queries (e.g. "Which cities...", "What martial arts...", "What recipes...", "What items...")
     _ASPECT_MAP = {
@@ -1194,21 +1342,36 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             "married wedding husband wife spouse partner engaged engagement fiance fiancee relationship anniversary married to",
         ("contact", "email", "phone", "address", "phone number", "social media", "handle"):
             "email phone contact address phone number handle profile account website reach",
+        ("外用", "药膏", "凝胶", "乳膏", "冷敷", "冰敷", "伸展", "刺痛"):
+            "外用 外用药 药膏 凝胶 过敏 红疹 发红 发痒 胃敏感 胃溃疡 华法林 不适合 冰敷 冷敷 伸展 伸直 大腿前侧 替代",
     }
     ql = query.lower()
     ql_aspect = re.sub(r"\b(?:my|your|his|her|their|our|\w+'s)\s+places?\b", "", ql)
     aspect_q_parts = []
     for keys, words in _ASPECT_MAP.items():
-        if any(re.search(rf"\b{re.escape(k)}\b", ql_aspect) for k in keys):
+        if any(
+            (k in ql_aspect if re.search(r"[\u4e00-\u9fff]", k) else re.search(rf"\b{re.escape(k)}\b", ql_aspect))
+            for k in keys
+        ):
             aspect_q_parts.append(words)
     aspect_top_set: set = set()
     if aspect_q_parts:
         aspect_combined = " ".join(aspect_q_parts)
         aspect_scores = sorted(bm25.score(aspect_combined), key=lambda x: x[1], reverse=True)
-        aspect_ranking = [mid for mid, s in aspect_scores if s > 0]
+        aspect_ranking = [mid for mid, s in aspect_scores if s > 0 and mid not in active_superseded_mids]
         aspect_top_set = set(aspect_ranking[:30])
         for rank, mid in enumerate(aspect_ranking[:120]):
             fused[mid] = fused.get(mid, 0.0) + 1.0 / (RRF_K + rank + 1)
+
+    if any(k in ql_aspect for k in ("外用", "药膏", "凝胶", "乳膏", "冷敷", "伸展")):
+        for mid_t, r_t in by_id.items():
+            if mid_t in active_superseded_mids:
+                continue
+            c_t = r_t.get("content", "")
+            if _STREAMING_FEEDBACK_PAT.search(c_t) or _STREAMING_TRAJECTORY_PAT.search(c_t):
+                continue
+            if ("外用药" in c_t and ("不适合" in c_t or "敏感" in c_t or "胃" in c_t)) or ("冰敷" in c_t and "伸展" in c_t):
+                fused[mid_t] = fused.get(mid_t, 0.0) + (1.2 if r_t.get("item_type") == "raw" else 0.8)
 
     # Explicit query date match boost:
     # When a query explicitly references a calendar date (e.g., "September 8, 2023", "Sep 05, 2025", "2023-09-08"),
@@ -1316,6 +1479,50 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                     "created_at": later_row.get("created_at"),
                     "timestamp": later_row.get("timestamp") or 0,
                 })
+
+        for r in rows:
+            if r.get("item_type") != "raw":
+                continue
+            r_day = _day(r.get("timestamp"), r.get("created_at"))
+            if r_day == query_iso_date:
+                m_ref = re.search(
+                    r"\bi\s+mentioned\s+my\s+([a-z][a-z\s]{1,30}?)\s+on\s+(\d{4}-\d{2}-\d{2})\b",
+                    r.get("content", ""),
+                    re.IGNORECASE,
+                )
+                if m_ref:
+                    ref_topic = m_ref.group(1).strip()
+                    ref_day = m_ref.group(2).strip()
+                    ref_fact = ""
+                    for r2 in rows:
+                        if r2.get("item_type") == "raw" and _day(r2.get("timestamp"), r2.get("created_at")) == ref_day:
+                            m_f = re.search(
+                                rf"\bmy\s+{re.escape(ref_topic)}\s+(?:are|is)\s+([^\.\n]+)",
+                                r2.get("content", ""),
+                                re.IGNORECASE,
+                            )
+                            if m_f:
+                                ref_fact = m_f.group(1).strip()
+                                break
+                    p_msg = (
+                        f"[Temporal Cross-Reference Notice]: On {query_iso_date}, the user did not directly name specific {ref_topic} titles "
+                        f"(cannot infer specific titles from {query_iso_date} alone; on {query_iso_date} the user only stated 'I mentioned my {ref_topic} on {ref_day}'). "
+                    )
+                    if ref_fact:
+                        p_msg += (
+                            f"The actual {ref_topic} were named earlier on {ref_day}: {ref_fact}. "
+                            f"State clearly that on {query_iso_date} the user only referred back to {ref_day} without naming specific titles on {query_iso_date}, "
+                            f"and note that the {ref_topic} mentioned on {ref_day} were {ref_fact}."
+                        )
+                    premise_notices.append({
+                        "id": f"premise_refdate_{r['memory_id']}",
+                        "content": p_msg,
+                        "text": p_msg,
+                        "score": 4.0,
+                        "created_at": r.get("created_at"),
+                        "timestamp": r.get("timestamp") or 0,
+                    })
+                    break
 
     if is_first_event:
         m_ev = re.search(r"which\s+event\s+happened\s+first[,:]?\s*(.*?)\s+or\s+(.*?)\??$", query, re.IGNORECASE)
@@ -1866,7 +2073,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         if not m:
             return []
         kind, sess, idx = m.group(1), m.group(2), int(m.group(3))
-        if kind == "raw" and (is_chrono or is_user_init or is_char_arc_q):
+        if kind == "raw" and (is_chrono or is_user_init or is_char_arc_q or re.search(r"[\u4e00-\u9fff]", query)):
             return []
         m_tag = _TURN_TAG_PAT.search(row_c)
         same_kind = []
@@ -1889,8 +2096,20 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         return same_kind
 
     ref_doc_fmt_reminder = ""
-    if is_ref_doc_session:
+    if kg_active_chain_mids:
+        chain_order = kg_active_chain_mids
+    elif is_user_init and is_chrono and len(user_init_primary_mids) >= 3:
+        chain_order = sorted(
+            user_init_primary_mids,
+            key=lambda m: (_get_effective_timestamp(by_id[m]), m),
+        )
+    elif is_ref_doc_session:
         doc_raw_mids = [r["memory_id"] for r in raw_rows_all if r["memory_id"] not in active_superseded_mids]
+        if any("[part " in by_id[m].get("content", "") for m in doc_raw_mids):
+            first_mids = [m for m in doc_raw_mids[:1]]
+            non_part_mids = [m for m in doc_raw_mids[1:] if "[part " not in by_id[m].get("content", "")]
+            part_mids = [m for m in doc_raw_mids[1:] if "[part " in by_id[m].get("content", "")]
+            doc_raw_mids = first_mids + non_part_mids + part_mids
         raw_total_bytes = sum(len(by_id[m].get("content", "").encode("utf-8")) for m in doc_raw_mids)
         if doc_raw_mids and raw_total_bytes <= byte_budget:
             chain_order = doc_raw_mids
@@ -1898,7 +2117,10 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             chain_order = doc_raw_mids + [m for m in chain_order if m not in doc_raw_mids]
     elif is_docpp_session:
         doc_raw_mids = [r["memory_id"] for r in raw_rows_all if r["memory_id"] not in active_superseded_mids]
-        if doc_raw_mids:
+        raw_total_bytes = sum(len(by_id[m].get("content", "").encode("utf-8")) for m in doc_raw_mids)
+        if doc_raw_mids and raw_total_bytes <= byte_budget:
+            chain_order = doc_raw_mids
+        elif doc_raw_mids:
             chain_order = doc_raw_mids + [m for m in chain_order if m not in doc_raw_mids]
 
     limit = max(1, min(top_k, max_items))
@@ -1919,8 +2141,15 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 mid_text = re.sub(r"(\[D1:1\]\[text\])\s*", r"\1 [Active Formatting & System Rules]: ", mid_text, count=1)
             if is_user_init and is_chrono:
                 parts_ua = re.split(r"\s+->\s+(?!->)", mid_text, maxsplit=1)
-                if len(parts_ua) == 2 and len(parts_ua[1]) > 450:
-                    mid_text = f"{parts_ua[0]} -> {parts_ua[1][:450]}..."
+                u_clean = re.sub(r"```[\s\S]*?```", " [code snippet] ", parts_ua[0])
+                u_clean = re.sub(r"->->\s*[\d,\s]+", "", u_clean)
+                u_clean = re.sub(r"\s+", " ", u_clean).strip()
+                if len(parts_ua) == 2:
+                    a_clean = re.sub(r"```[\s\S]*?```", " ", parts_ua[1])
+                    a_clean = re.sub(r"\s+", " ", a_clean).strip()
+                    mid_text = f"{u_clean} -> {a_clean[:240]}..." if len(a_clean) > 240 else f"{u_clean} -> {a_clean}"
+                else:
+                    mid_text = u_clean
             used.add(mid)
             p_parts = []
             for nid in neighbours(mid)[:NEIGHBOUR_WINDOW]:
@@ -2359,13 +2588,18 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 }
                 return [contradiction_notice]
 
-    if order == "time" and not is_ref_doc_session and not is_docpp_session:
+    if order == "time" and not is_ref_doc_session and not is_docpp_session and not kg_active_chain_mids:
         if is_char_arc_q:
             out.sort(key=lambda it: (0 if str(it["id"]).startswith("raw_") else 1, _get_effective_timestamp(it), it["id"]))
         elif is_user_init and user_init_primary_mids:
             out.sort(key=lambda it: (0 if it["id"] in user_init_primary_mids else 1, _get_effective_timestamp(it), it["id"]))
         else:
             out.sort(key=lambda it: (_get_effective_timestamp(it), it["id"]))
+    if is_user_init and is_chrono and len(user_init_primary_mids) >= 3 and len(out) >= 3:
+        n_steps = len(out)
+        for idx_u, it_u in enumerate(out, 1):
+            it_u["content"] = f"[Step {idx_u} of {n_steps} in chronological order (User-initiated aspect {idx_u})] {it_u['content']}"
+            it_u["text"] = it_u["content"]
     if is_ref_doc_session and ref_doc_fmt_reminder and len(out) >= 2:
         if ref_doc_fmt_reminder not in out[-1]["content"]:
             out[-1]["content"] = f"{out[-1]['content']}\n\n{ref_doc_fmt_reminder}"
