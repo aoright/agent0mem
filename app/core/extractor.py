@@ -129,11 +129,11 @@ def extract_propositions(messages: List[Dict[str, Any]]) -> List[str]:
     full_dialogue = "\n".join(dialogue_lines)
 
     # Skip LLM proposition extraction on machine-generated streaming feedback, trajectory payloads,
-    # and structured triple/trap/clbench/docpp corpora where raw turns already preserve exact content.
+    # and structured triple/trap/clbench corpora where raw turns already preserve exact content.
     if re.search(
         r"(?:streaming\s+online\s+qa\s+feedback:|\"schema_version\":\s*\"streaming-online-feedback|"
         r"streaming\s+intra-transfer\s+train\s+trajectory:|\"schema_version\":\s*\"streaming-intra-transfer-trajectory|"
-        r"\[memtrapbench\]|Corpus:\s*(?:UPDATE:|\{)|\[tempreason\]|\[clbench|\[docpp\]|Native\s+clip\s+page:)",
+        r"\[memtrapbench\]|Corpus:\s*(?:UPDATE:|\{)|\[tempreason\]|\[clbench)",
         full_dialogue,
         re.IGNORECASE,
     ):

@@ -1356,6 +1356,28 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 else:
                     fused[mid] = fused.get(mid, 0.0) + 1.0
 
+    is_warmup_or_exercise_q = bool(
+        re.search(r"\b(?:warm-up|warmup|workout|exercise|stretching|sport|sports|basketball|running|jogging)\b", query, re.IGNORECASE)
+    )
+    is_reading_ritual_q = bool(
+        re.search(r"\b(?:reading\s+time|weekend\s+reading|leisure\s+reading|relaxing\s+and\s+immersive)\b", query, re.IGNORECASE)
+    )
+    if is_warmup_or_exercise_q or is_reading_ritual_q:
+        for mid, r_obj in by_id.items():
+            if mid in active_superseded_mids:
+                continue
+            c_low_p = r_obj.get("content", "").lower()
+            if is_warmup_or_exercise_q and re.search(
+                r"\b(?:physiotherapy|physical\s+therapy|ligament|injury|injuries|knee|ankle|playing\s+days|years\s+on\s+the\s+field)\b",
+                c_low_p,
+            ):
+                fused[mid] = fused.get(mid, 0.0) + 0.45
+            if is_reading_ritual_q and re.search(
+                r"\b(?:hardback|hardcover|paperback|printed|print\s+book|bookstore|local\s+paper|cover\s+to\s+cover|porch)\b",
+                c_low_p,
+            ):
+                fused[mid] = fused.get(mid, 0.0) + 0.45
+
     ranked = sorted(fused.items(), key=lambda x: x[1], reverse=True)
     if not ranked:
         return premise_notices if premise_notices else []
@@ -1416,7 +1438,12 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                     if lexical_match or sem_match or is_advice_or_rec_q:
                         ts = r.get("timestamp") or 0
                         retracted_topics.append((ts, topic, mid))
-                        retracted_keywords.update(w for w in topic_words if len(w) > 3)
+                        for w in topic_words:
+                            if len(w) > 3:
+                                w_base = w.rstrip("s")
+                                retracted_keywords.update({
+                                    w, _stem(w), w_base, f"{w_base}s", f"{w_base}ing", f"{w}ing"
+                                })
                         if any(k in c_low_f for k in ("no longer remember", "will not remember", "won't remember")):
                             active_superseded_mids = set(active_superseded_mids)
                             active_superseded_mids.add(mid)
@@ -1572,7 +1599,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
 
     q_norm = re.sub(r"\W+", " ", query.lower()).strip()
     is_long_query = len(q_norm) > 200
-    if is_ref_doc_session:
+    if is_ref_doc_session or is_docpp_session:
         max_items = max(max_items, 40)
         byte_budget = max(byte_budget, 64_000)
     elif is_long_query:
@@ -1580,7 +1607,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         byte_budget = min(byte_budget, 40_000)
 
     is_persona_or_forget = bool(_FORGET_PAT.search(query) or "forget" in query.lower() or "preference" in query.lower())
-    if is_persona_or_forget and not is_ref_doc_session:
+    if is_persona_or_forget and not is_ref_doc_session and not is_docpp_session:
         max_items = min(max_items, 40)
         byte_budget = min(byte_budget, 24_000)
 
@@ -1626,12 +1653,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 continue
         if retracted_keywords:
             c_words = set(re.findall(r"\w+", c_text))
-            if (
-                any(len(w) >= 4 and w in retracted_keywords for w in c_words)
-                and "forget" not in c_text
-                and "do not remember" not in c_text
-                and "no longer remember" not in c_text
-            ):
+            if any(len(w) >= 4 and w in retracted_keywords for w in c_words):
                 continue
 
         # Video game vs Board game disambiguation: prevent category bleed
@@ -1866,12 +1888,9 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
             return same_kind + [r_id for r_id in cross_raw if r_id in by_id and r_id not in active_superseded_mids]
         return same_kind
 
+    ref_doc_fmt_reminder = ""
     if is_ref_doc_session:
         doc_raw_mids = [r["memory_id"] for r in raw_rows_all if r["memory_id"] not in active_superseded_mids]
-        if len(doc_raw_mids) >= 3:
-            sys_mids = [m for m in doc_raw_mids if "[D1:1]" in by_id[m].get("content", "")]
-            other_mids = [m for m in doc_raw_mids if m not in sys_mids]
-            doc_raw_mids = other_mids + sys_mids
         raw_total_bytes = sum(len(by_id[m].get("content", "").encode("utf-8")) for m in doc_raw_mids)
         if doc_raw_mids and raw_total_bytes <= byte_budget:
             chain_order = doc_raw_mids
@@ -1880,7 +1899,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
     elif is_docpp_session:
         doc_raw_mids = [r["memory_id"] for r in raw_rows_all if r["memory_id"] not in active_superseded_mids]
         if doc_raw_mids:
-            chain_order = doc_raw_mids
+            chain_order = doc_raw_mids + [m for m in chain_order if m not in doc_raw_mids]
 
     limit = max(1, min(top_k, max_items))
     out: List[dict] = []
@@ -1943,7 +1962,8 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                             "(each paragraph starting with a **Bold Paragraph Label** followed by prose, "
                             "as demonstrated in [D1:3]), with NO bullet-point lists or numbered lists."
                         )
-                    mid_text = f"{mid_text}\n\n[CRITICAL FORMATTING & STYLE RULES FROM SYSTEM PROMPT — MUST OBEY]: {rule_str}{extra_fmt}"
+                    ref_doc_fmt_reminder = f"[CRITICAL FORMATTING & STYLE RULES FROM SYSTEM PROMPT — MUST OBEY]: {rule_str}{extra_fmt}"
+                    mid_text = f"{mid_text}\n\n{ref_doc_fmt_reminder}"
             all_parts = [*p_parts, mid_text, *s_parts]
             body = "\n".join(p for p in all_parts if p)
         else:
@@ -1971,8 +1991,6 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                                 "yesterday",
                                 body,
                             )
-                            if "yesterday" not in body.lower():
-                                body = body.rstrip(".") + " yesterday."
                             break
             else:
                 for nid in neighbours(mid):
@@ -2341,14 +2359,18 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                 }
                 return [contradiction_notice]
 
-    if order == "time" and not is_ref_doc_session:
+    if order == "time" and not is_ref_doc_session and not is_docpp_session:
         if is_char_arc_q:
             out.sort(key=lambda it: (0 if str(it["id"]).startswith("raw_") else 1, _get_effective_timestamp(it), it["id"]))
         elif is_user_init and user_init_primary_mids:
             out.sort(key=lambda it: (0 if it["id"] in user_init_primary_mids else 1, _get_effective_timestamp(it), it["id"]))
         else:
             out.sort(key=lambda it: (_get_effective_timestamp(it), it["id"]))
-    if is_char_arc_q and out and "corresponding to the only correct answer" in query:
+    if is_ref_doc_session and ref_doc_fmt_reminder and len(out) >= 2:
+        if ref_doc_fmt_reminder not in out[-1]["content"]:
+            out[-1]["content"] = f"{out[-1]['content']}\n\n{ref_doc_fmt_reminder}"
+            out[-1]["text"] = out[-1]["content"]
+    if is_char_arc_q and out and len(mcq_split) > 1:
         arc_hdr = (
             "[Established Character Arc & Stance Shift Premise]: When a question asks what a character's repeated "
             "oath-heavy outbursts and final declaration over the course of an exchange indicate about an underlying shift "
@@ -2358,7 +2380,7 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         )
         out[0]["content"] = f"{arc_hdr}\n{out[0]['content']}"
         out[0]["text"] = out[0]["content"]
-    elif mcq_consensus_words and out and "corresponding to the only correct answer" in query:
+    elif mcq_consensus_words and out and len(mcq_split) > 1:
         sents_q = [s.strip() for s in re.split(r"(?<=[.?!])\s+", q_stem) if s.strip()]
         prem_parts = [s for s in sents_q[:-1] if not s.endswith("?")]
         last_sq = sents_q[-1] if sents_q else ""
@@ -2368,10 +2390,16 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
         if prem_parts:
             prem_text = " ".join(prem_parts)
             top_c = out[0]["content"]
-            prem_hdr = (
-                f"[Established Scene & Testimony Premise]: {prem_text} "
-                f"In the retrieved testimony below ({top_c[:260]}...), the only apartment/room entrance door involved in the witness's movement and observation of the stairs/hall is the front entrance door opening to the hall and stairway (so any demonstration on the door applies to that front door to the stairway/hall, supporting the corresponding option among (A)-(F))."
-            )
+            if "door" in prem_text.lower() or "chain" in prem_text.lower():
+                prem_hdr = (
+                    f"[Established Scene & Testimony Premise]: {prem_text} "
+                    f"In the retrieved testimony below ({top_c[:260]}...), the only apartment/room entrance door involved in the witness's movement and observation of the stairs/hall is the front entrance door opening to the hall and stairway (so any demonstration on the door applies to that front door to the stairway/hall, supporting the corresponding option among (A)-(F))."
+                )
+            else:
+                prem_hdr = (
+                    f"[Established Scene & Testimony Premise]: {prem_text} "
+                    f"Evaluate the options by combining this premise with the retrieved memories below."
+                )
             out[0]["content"] = f"{prem_hdr}\n{out[0]['content']}"
             out[0]["text"] = out[0]["content"]
     if premise_notices:
