@@ -1269,10 +1269,17 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                         continue
                     if any(ct in c_str for ct in cjk_core_terms):
                         d_c = _day(r_c.get("timestamp"), r_c.get("created_at"))
+                        ct_pat = "|".join(re.escape(ct) for ct in cjk_core_terms)
+                        same_sent_num_unit = bool(
+                            q_unit and re.search(
+                                rf"(?:{ct_pat})[^\n。！？]{{0,45}}(?:\d+|[一二两三四五六七八九十百]+)[来左右多到\-~～]*\s*{re.escape(q_unit)}",
+                                c_str,
+                            )
+                        )
                         has_num_unit = bool(
                             q_unit and re.search(rf"(?:\d+|[一二两三四五六七八九十百]+)[来左右多到\-~～]*\s*{re.escape(q_unit)}", c_str)
                         )
-                        unit_bonus = 0.8 if has_num_unit else (0.2 if (q_unit and q_unit in c_str) else 0.0)
+                        unit_bonus = 1.4 if same_sent_num_unit else (0.4 if has_num_unit else 0.0)
                         if d_c == max_day:
                             fused[mid_c] = fused.get(mid_c, 0.0) + (1.8 if r_c.get("item_type") == "raw" else 1.2) + unit_bonus
                         elif prev_day and d_c == prev_day:
