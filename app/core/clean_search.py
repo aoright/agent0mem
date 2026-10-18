@@ -1440,9 +1440,9 @@ def clean_search(user_id: str, query: str, top_k: int = 100,
                         retracted_topics.append((ts, topic, mid))
                         for w in topic_words:
                             if len(w) > 3:
-                                w_base = w.rstrip("s")
+                                w_base = w[:-3] if (w.endswith("ing") and len(w) > 5) else w.rstrip("s")
                                 retracted_keywords.update({
-                                    w, _stem(w), w_base, f"{w_base}s", f"{w_base}ing", f"{w}ing"
+                                    w, w_base, f"{w_base}s", f"{w_base}ing", f"{w}ing"
                                 })
                         if any(k in c_low_f for k in ("no longer remember", "will not remember", "won't remember")):
                             active_superseded_mids = set(active_superseded_mids)
