@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# Data & Databases (Zero Database Tracking rule)
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.wal
+*.shm
+*.dump
+data/
+backups/
+
+# Environment and IDE
+.env
+.DS_Store
+.idea/
+.vscode/
